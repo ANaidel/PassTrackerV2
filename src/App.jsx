@@ -98,6 +98,37 @@ const loadExams = (templates) => {
   }
 };
 
+const EditableTextInput = ({ value, onCommit, className = '', placeholder = '', type = 'text' }) => {
+  const [draft, setDraft] = useState(value ?? '');
+
+  useEffect(() => {
+    setDraft(value ?? '');
+  }, [value]);
+
+  const commit = () => {
+    const nextValue = draft;
+    if (nextValue !== value) {
+      onCommit(nextValue);
+    }
+  };
+
+  return (
+    <input
+      type={type}
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+        }
+      }}
+      className={className}
+    />
+  );
+};
+
 const PassTracker = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [resourcePage, setResourcePage] = useState('home');
@@ -527,10 +558,9 @@ const PassTracker = () => {
               <div key={exam.id} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Exam Name</label>
-                  <input
-                    type="text"
+                  <EditableTextInput
                     value={exam.name}
-                    onChange={(e) => updateExamName(exam.id, e.target.value)}
+                    onCommit={(next) => updateExamName(exam.id, next)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -681,10 +711,9 @@ const PassTracker = () => {
                       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                         <div className="flex-1">
                           <label className="block text-sm font-medium text-gray-700 mb-1">Lecture Name</label>
-                          <input
-                            type="text"
+                          <EditableTextInput
                             value={material.name}
-                            onChange={(e) => updateMaterial(exam.id, material.id, 'name', e.target.value)}
+                            onCommit={(next) => updateMaterial(exam.id, material.id, 'name', next)}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
