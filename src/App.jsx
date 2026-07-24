@@ -1,35 +1,111 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft } from 'lucide-react';
 
-const PassTracker = () => {
-  const normalizeExamsData = (examList) =>
-    examList.map(exam => ({
-      ...exam,
-      materials: (exam.materials || []).map(material => ({
-        ...material,
-        name: material.name === 'New Material' || !material.name ? 'Lecture Name' : material.name,
-      })),
-    }));
+const DEFAULT_TASK_TEMPLATES = [
+  { label: 'Preview', offsetDays: -1 },
+  { label: 'Lecture', offsetDays: 0 },
+  { label: 'Notes', offsetDays: 1 },
+  { label: 'Questions', offsetDays: 2 },
+  { label: 'Review Missed Questions', offsetDays: 2 },
+  { label: 'Additional Review', offsetDays: 4 },
+];
 
-  const loadExams = () => {
-    const saved = localStorage.getItem('passTrackerExams');
-    if (!saved) {
-      return [{ id: 1, name: 'Exam 1', date: '', materials: [] }];
-    }
+const LEGACY_TASK_LABEL_MAP = {
+  Review: 'Review Missed Questions',
+  Additional: 'Additional Review',
+};
+
+const cloneTaskTemplates = (templates) =>
+  templates.map(template => ({
+    label: template.label,
+    offsetDays: Number(template.offsetDays) || 0,
+  }));
+
+const getUniqueTaskLabel = (baseLabel, existingLabels) => {
+  const trimmed = baseLabel.trim();
+  const candidateBase = trimmed || 'New Task';
+  let candidate = candidateBase;
+  let suffix = 2;
+
+  while (existingLabels.has(candidate)) {
+    candidate = `${candidateBase} ${suffix}`;
+    suffix += 1;
+  }
+
+  return candidate;
+};
+
+const loadTaskTemplates = () => {
+  const saved = localStorage.getItem('passTrackerTaskTemplates');
+  if (!saved) return cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
+
+  try {
     const parsed = JSON.parse(saved);
-    if (Array.isArray(parsed)) return normalizeExamsData(parsed);
+    if (!Array.isArray(parsed)) return cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
+
+    const normalized = parsed
+      .map(template => ({
+        label: template.label === 'Review' ? 'Review Missed Questions' : template.label === 'Additional' ? 'Additional Review' : template.label,
+        offsetDays: Number(template.offsetDays) || 0,
+      }))
+      .filter(template => template.label);
+
+    return normalized.length > 0 ? normalized : cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
+  } catch {
+    return cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
+  }
+};
+
+const normalizeTasksForTemplates = (rawTasks, templates, excludedTasks = []) => {
+  const tasks = {};
+  templates.forEach(template => {
+    if (excludedTasks.includes(template.label)) return;
+    const legacyKey = Object.entries(LEGACY_TASK_LABEL_MAP).find(([, newLabel]) => newLabel === template.label)?.[0];
+    tasks[template.label] = rawTasks?.[template.label] ?? rawTasks?.[legacyKey] ?? 'Not Started';
+  });
+
+  return tasks;
+};
+
+const normalizeExamsData = (examList, templates) =>
+  examList.map(exam => ({
+    ...exam,
+    materials: (exam.materials || []).map(material => ({
+      ...material,
+      excludedTasks: Array.isArray(material.excludedTasks) ? material.excludedTasks : [],
+      name: material.name === 'New Material' || !material.name ? 'Lecture Name' : material.name,
+      tasks: normalizeTasksForTemplates(material.tasks, templates, Array.isArray(material.excludedTasks) ? material.excludedTasks : []),
+    })),
+  }));
+
+const loadExams = (templates) => {
+  const saved = localStorage.getItem('passTrackerExams');
+  if (!saved) {
+    return [{ id: 1, name: 'Exam 1', date: '', materials: [] }];
+  }
+
+  try {
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed)) return normalizeExamsData(parsed, templates);
     return normalizeExamsData(Object.entries(parsed).map(([key, exam]) => ({
       id: Number(key) || Date.now(),
       name: exam.name || 'Exam',
       date: exam.date || '',
       materials: exam.materials || [],
-    })));
-  };
+    })), templates);
+  } catch {
+    return [{ id: 1, name: 'Exam 1', date: '', materials: [] }];
+  }
+};
 
+const PassTracker = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [resourcePage, setResourcePage] = useState('home');
-  const [exams, setExams] = useState(loadExams);
-  const [selectedExam, setSelectedExam] = useState(() => loadExams()[0]?.id ?? null);
+  const initialTaskTemplates = loadTaskTemplates();
+  const initialExams = loadExams(initialTaskTemplates);
+  const [taskTemplates, setTaskTemplates] = useState(() => initialTaskTemplates);
+  const [exams, setExams] = useState(() => initialExams);
+  const [selectedExam, setSelectedExam] = useState(() => initialExams[0]?.id ?? null);
   const [expandedMaterials, setExpandedMaterials] = useState({});
   const [resources, setResources] = useState(() => {
     const saved = localStorage.getItem('passTrackerResources');
@@ -45,14 +121,12 @@ const PassTracker = () => {
   }, [exams]);
 
   useEffect(() => {
-    const normalized = normalizeExamsData(exams);
-    const changed = JSON.stringify(normalized) !== JSON.stringify(exams);
-    if (changed) {
-      setExams(normalized);
-    }
-    // Run once after load to normalize any older material names.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    localStorage.setItem('passTrackerTaskTemplates', JSON.stringify(taskTemplates));
+    setExams(prev => {
+      const normalized = normalizeExamsData(prev, taskTemplates);
+      return JSON.stringify(normalized) === JSON.stringify(prev) ? prev : normalized;
+    });
+  }, [taskTemplates]);
 
   useEffect(() => {
     localStorage.setItem('passTrackerResources', JSON.stringify(resources));
@@ -66,7 +140,8 @@ const PassTracker = () => {
 
   const currentExam = exams.find(e => e.id === selectedExam) ?? exams[0];
 
-  const taskTypes = ['Preview', 'Lecture', 'Notes', 'Questions', 'Review', 'Additional'];
+  const taskTypes = taskTemplates.map(template => template.label);
+  const taskTemplateMap = Object.fromEntries(taskTemplates.map(template => [template.label, template.offsetDays]));
 
   const addExam = () => {
     const id = Date.now();
@@ -101,6 +176,7 @@ const PassTracker = () => {
               name: 'Lecture Name',
               date: new Date().toISOString().split('T')[0],
               difficulty: 'Medium',
+              excludedTasks: [],
               tasks: taskTypes.reduce((acc, type) => ({ ...acc, [type]: 'Not Started' }), {})
             }]
           }
@@ -150,12 +226,73 @@ const PassTracker = () => {
     updateTask(examId, materialId, taskType, 'Complete');
   };
 
+  const addTaskTemplate = (label, offsetDays) => {
+    const nextLabel = getUniqueTaskLabel(label, new Set(taskTemplates.map(template => template.label)));
+    const nextTemplate = {
+      label: nextLabel,
+      offsetDays: Number(offsetDays) || 0,
+    };
+
+    setTaskTemplates(prev => [...prev, nextTemplate]);
+    setExams(prev => prev.map(exam => ({
+      ...exam,
+      materials: exam.materials.map(material => ({
+        ...material,
+        tasks: {
+          ...material.tasks,
+          [nextLabel]: material.tasks?.[nextLabel] ?? 'Not Started',
+        },
+      })),
+    })));
+  };
+
+  const removeTaskTemplate = (label) => {
+    if (taskTemplates.length <= 1) return;
+
+    setTaskTemplates(prev => prev.filter(template => template.label !== label));
+    setExams(prev => prev.map(exam => ({
+      ...exam,
+      materials: exam.materials.map(material => {
+        const nextTasks = { ...material.tasks };
+        delete nextTasks[label];
+        return { ...material, tasks: nextTasks };
+      }),
+    })));
+  };
+
+  const removeTaskFromLecture = (examId, materialId, taskType) => {
+    setExams(prev => prev.map(exam =>
+      exam.id !== examId
+        ? exam
+        : {
+            ...exam,
+            materials: exam.materials.map(material => {
+              if (material.id !== materialId) return material;
+              const nextTasks = { ...material.tasks };
+              delete nextTasks[taskType];
+              const excludedTasks = Array.from(new Set([...(material.excludedTasks || []), taskType]));
+              return {
+                ...material,
+                tasks: nextTasks,
+                excludedTasks,
+              };
+            }),
+          }
+    ));
+  };
+
+  const getActiveTaskLabels = (material) => {
+    const excludedTasks = new Set(material.excludedTasks || []);
+    return taskTypes.filter(taskType => !excludedTasks.has(taskType) && Object.prototype.hasOwnProperty.call(material.tasks || {}, taskType));
+  };
+
   const calculateProgress = (materials) => {
     if (materials.length === 0) return 0;
-    const totalTasks = materials.length * taskTypes.length;
-    const completedTasks = materials.reduce((acc, m) =>
-      acc + Object.values(m.tasks).filter(t => t === 'Complete').length, 0
+    const totalTasks = materials.reduce((acc, material) => acc + getActiveTaskLabels(material).length, 0);
+    const completedTasks = materials.reduce((acc, material) =>
+      acc + getActiveTaskLabels(material).filter(taskType => material.tasks?.[taskType] === 'Complete').length, 0
     );
+    if (totalTasks === 0) return 0;
     return Math.round((completedTasks / totalTasks) * 100);
   };
 
@@ -178,20 +315,11 @@ const PassTracker = () => {
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  const taskDueOffsets = {
-    Preview: -1,
-    Lecture: 0,
-    Notes: 1,
-    Questions: 2,
-    Review: 2,
-    Additional: 4
-  };
-
   const getTaskDueDate = (materialDate, taskType) => {
     if (!materialDate) return null;
     const dueDate = new Date(`${materialDate}T00:00:00`);
     if (Number.isNaN(dueDate.getTime())) return null;
-    dueDate.setDate(dueDate.getDate() + (taskDueOffsets[taskType] ?? 0));
+    dueDate.setDate(dueDate.getDate() + (taskTemplateMap[taskType] ?? 0));
     return dueDate;
   };
 
@@ -199,7 +327,7 @@ const PassTracker = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const items = taskTypes
+    const items = getActiveTaskLabels(material)
       .map(taskType => {
         const dueDate = getTaskDueDate(material.date, taskType);
         const status = material.tasks?.[taskType] || 'Not Started';
@@ -228,7 +356,7 @@ const PassTracker = () => {
 
     const items = exams.flatMap(exam =>
       exam.materials.flatMap(material =>
-        taskTypes
+        getActiveTaskLabels(material)
           .filter(taskType => material.tasks?.[taskType] !== 'Complete')
           .map(taskType => {
             const dueDate = getTaskDueDate(material.date, taskType);
@@ -281,7 +409,80 @@ const PassTracker = () => {
     };
   };
 
+  const TaskSetupPanel = () => {
+    const [newTaskLabel, setNewTaskLabel] = useState('');
+    const [newTaskOffset, setNewTaskOffset] = useState(0);
+
+    return (
+      <div className="bg-white p-6 rounded-lg border border-gray-200">
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Task Label</label>
+              <input
+                type="text"
+                value={newTaskLabel}
+                onChange={(e) => setNewTaskLabel(e.target.value)}
+                placeholder="e.g. Practice Quiz"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Due Offset (days)</label>
+              <input
+                type="number"
+                value={newTaskOffset}
+                onChange={(e) => setNewTaskOffset(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              onClick={() => {
+                addTaskTemplate(newTaskLabel, newTaskOffset);
+                setNewTaskLabel('');
+                setNewTaskOffset(0);
+              }}
+              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+            >
+              <Plus size={18} />
+              <span>Add Task</span>
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {taskTemplates.map(template => (
+              <div key={template.label} className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50">
+                <div>
+                  <p className="font-medium text-gray-900">{template.label}</p>
+                  <p className="text-sm text-gray-600">
+                    Due {template.offsetDays === 0
+                      ? 'same day as lecture'
+                      : template.offsetDays > 0
+                        ? `${template.offsetDays} day${template.offsetDays === 1 ? '' : 's'} after lecture`
+                        : `${Math.abs(template.offsetDays)} day${Math.abs(template.offsetDays) === 1 ? '' : 's'} before lecture`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => removeTaskTemplate(template.label)}
+                  className="flex items-center space-x-1 text-red-600 hover:text-red-700 transition text-sm font-medium"
+                >
+                  <Trash2 size={16} />
+                  <span>Remove</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const Dashboard = () => {
+    const [showTaskSetup, setShowTaskSetup] = useState(false);
+
     if (!currentExam) {
       return (
         <div className="bg-white p-12 rounded-lg border border-gray-200 text-center">
@@ -417,6 +618,22 @@ const PassTracker = () => {
             </div>
           </div>
         </div>
+
+        <div className="bg-white p-6 rounded-lg border border-gray-200">
+          <button
+            onClick={() => setShowTaskSetup(prev => !prev)}
+            className="flex w-full items-center justify-between text-left"
+          >
+            <div>
+              <h3 className="text-lg font-semibold">Task Setup</h3>
+              <p className="text-sm text-gray-600 mt-1">Collapse or expand the task label editor.</p>
+            </div>
+            <span className="text-blue-600 font-medium">
+              {showTaskSetup ? 'Hide' : 'Show'}
+            </span>
+          </button>
+          {showTaskSetup && <div className="mt-4"><TaskSetupPanel /></div>}
+        </div>
       </div>
     );
   };
@@ -521,41 +738,57 @@ const PassTracker = () => {
 
                   {isExpanded && (
                     <div className="p-4">
-                      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-                        {taskTypes.map(type => (
-                          <div key={type}>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">{type}</label>
-                            <select
-                              value={material.tasks[type]}
-                              onChange={(e) => updateTask(exam.id, material.id, type, e.target.value)}
-                              className={`w-full px-2 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                material.tasks[type] === 'Complete'
-                                  ? 'bg-green-50 border-green-300 text-green-700 font-medium'
-                                  : material.tasks[type] === 'In Progress'
-                                  ? 'bg-yellow-50 border-yellow-300 text-yellow-700'
-                                  : 'bg-gray-50 border-gray-300 text-gray-700'
-                              }`}
-                            >
-                              <option>Not Started</option>
-                              <option>In Progress</option>
-                              <option>Complete</option>
-                            </select>
-                          </div>
-                        ))}
-                      </div>
+                      {getActiveTaskLabels(material).length === 0 ? (
+                        <p className="text-sm text-gray-600">All tasks have been removed from this lecture.</p>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                          {getActiveTaskLabels(material).map(type => (
+                            <div key={type} className="rounded-lg border border-gray-200 bg-white p-2">
+                              <div className="mb-1 flex items-center justify-between gap-2">
+                                <label className="block text-xs font-medium text-gray-600">{type}</label>
+                                <button
+                                  onClick={() => removeTaskFromLecture(exam.id, material.id, type)}
+                                  className="text-[11px] font-medium text-red-600 hover:text-red-700 transition"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                              <select
+                                value={material.tasks[type]}
+                                onChange={(e) => updateTask(exam.id, material.id, type, e.target.value)}
+                                className={`w-full px-2 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                  material.tasks[type] === 'Complete'
+                                    ? 'bg-green-50 border-green-300 text-green-700 font-medium'
+                                    : material.tasks[type] === 'In Progress'
+                                    ? 'bg-yellow-50 border-yellow-300 text-yellow-700'
+                                    : 'bg-gray-50 border-gray-300 text-gray-700'
+                                }`}
+                              >
+                                <option>Not Started</option>
+                                <option>In Progress</option>
+                                <option>Complete</option>
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       <div className="mt-4">
                         <div className="flex justify-between text-sm mb-1">
                           <span className="text-gray-600">Progress:</span>
                           <span className="font-semibold text-gray-900">
-                            {Math.round((Object.values(material.tasks).filter(t => t === 'Complete').length / taskTypes.length) * 100)}%
+                            {getActiveTaskLabels(material).length === 0
+                              ? '0%'
+                              : `${Math.round((getActiveTaskLabels(material).filter(taskType => material.tasks[taskType] === 'Complete').length / getActiveTaskLabels(material).length) * 100)}%`}
                           </span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
                           <div
                             className="bg-blue-600 h-2 rounded-full transition-all"
                             style={{
-                              width: `${(Object.values(material.tasks).filter(t => t === 'Complete').length / taskTypes.length) * 100}%`
+                              width: `${getActiveTaskLabels(material).length === 0
+                                ? 0
+                                : (getActiveTaskLabels(material).filter(taskType => material.tasks[taskType] === 'Complete').length / getActiveTaskLabels(material).length) * 100}%`
                             }}
                           ></div>
                         </div>
