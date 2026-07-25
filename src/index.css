@@ -1,3 +1,40 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+@import "tailwindcss";
+
+/* 1. Tell Tailwind to map these color names to your variables */
+@theme {
+  --color-app-bg: var(--bg-color);
+  --color-app-text: var(--text-color);
+  --color-app-primary: var(--primary-color);
+}
+
+/* 2. Set the default values (e.g., Light Theme) */
+:root {
+  --bg-color: #f7fbfd;
+  --text-color: #21343a;
+  --primary-color: #3587A4;
+  --surface-color: #ffffff;
+  --surface-muted-color: #eff7fa;
+  --border-color: #dcebf1;
+}
+
+/* 3. Override variables for alternate themes */
+[data-theme="dark"] {
+  --bg-color: #101b1f;
+  --text-color: #f7fbfd;
+  --primary-color: #88CCF1;
+  --surface-color: #18262b;
+  --surface-muted-color: #21343a;
+  --border-color: #304a53;
+}
+
+[data-theme="cyberpunk"] {
+  --bg-color: #08161a;
+  --text-color: #dff2fb;
+  --primary-color: #2D898B;
+  --surface-color: #12252b;
+  --surface-muted-color: #1c343b;
+  --border-color: #2d6f86;
+}
