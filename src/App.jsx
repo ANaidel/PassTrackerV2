@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X } from 'lucide-react';
 
 const DEFAULT_TASK_TEMPLATES = [
   { label: 'Preview', offsetDays: -1 },
@@ -132,6 +132,7 @@ const EditableTextInput = ({ value, onCommit, className = '', placeholder = '', 
 const PassTracker = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [resourcePage, setResourcePage] = useState('home');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const initialTaskTemplates = loadTaskTemplates();
   const initialExams = loadExams(initialTaskTemplates);
   const [taskTemplates, setTaskTemplates] = useState(() => initialTaskTemplates);
@@ -173,6 +174,12 @@ const PassTracker = () => {
 
   const taskTypes = taskTemplates.map(template => template.label);
   const taskTemplateMap = Object.fromEntries(taskTemplates.map(template => [template.label, template.offsetDays]));
+  const navTabs = [
+    { id: 'dashboard', label: 'Dashboard', icon: Home },
+    { id: 'tracker', label: 'Progress Tracker', icon: TrendingUp },
+    { id: 'todo', label: 'To Do' },
+    { id: 'resources', label: 'Resources', icon: BookOpen }
+  ];
 
   const addExam = () => {
     const id = Date.now();
@@ -1167,21 +1174,28 @@ const PassTracker = () => {
       {/* Navigation */}
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-3 py-3 lg:flex-row lg:items-center lg:justify-between lg:py-0">
+          <div className="flex items-center justify-between py-3 lg:hidden">
+            <div className="text-2xl font-bold text-blue-600 whitespace-nowrap">PassTracker™</div>
+            <button
+              onClick={() => setMobileMenuOpen(prev => !prev)}
+              className="inline-flex items-center justify-center rounded-lg border border-gray-300 p-2 text-gray-700 hover:bg-gray-100"
+              aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+            >
+              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          </div>
+
+          <div className="hidden flex-col gap-3 py-3 lg:flex lg:flex-row lg:items-center lg:justify-between lg:py-0">
             <div className="flex flex-wrap items-center gap-3 sm:gap-8">
               <div className="text-2xl font-bold text-blue-600 whitespace-nowrap">PassTracker™</div>
               <div className="flex flex-wrap gap-1">
-                {[
-                  { id: 'dashboard', label: 'Dashboard', icon: Home },
-                  { id: 'tracker', label: 'Progress Tracker', icon: TrendingUp },
-                  { id: 'todo', label: 'To Do' },
-                  { id: 'resources', label: 'Resources', icon: BookOpen }
-                ].map(tab => {
+                {navTabs.map(tab => {
                   return (
                     <button
                       key={tab.id}
                       onClick={() => {
                         setActiveTab(tab.id);
+                        setMobileMenuOpen(false);
                         if (tab.id === 'resources') setResourcePage('home');
                       }}
                       className={`inline-flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-lg font-medium transition sm:px-4 ${
@@ -1204,7 +1218,10 @@ const PassTracker = () => {
                 {exams.map(exam => (
                   <button
                     key={exam.id}
-                    onClick={() => setSelectedExam(exam.id)}
+                    onClick={() => {
+                      setSelectedExam(exam.id);
+                      setMobileMenuOpen(false);
+                    }}
                     className={`px-4 py-2 rounded-lg font-medium transition whitespace-nowrap ${
                       selectedExam === exam.id
                         ? 'bg-blue-100 text-blue-700'
@@ -1215,7 +1232,10 @@ const PassTracker = () => {
                   </button>
                 ))}
                 <button
-                  onClick={addExam}
+                  onClick={() => {
+                    addExam();
+                    setMobileMenuOpen(false);
+                  }}
                   className="px-3 py-2 rounded-lg font-medium transition text-gray-600 hover:bg-gray-100 border border-dashed border-gray-300"
                   title="Add Exam"
                 >
@@ -1225,7 +1245,10 @@ const PassTracker = () => {
             )}
             {activeTab !== 'resources' && exams.length === 0 && (
               <button
-                onClick={addExam}
+                onClick={() => {
+                  addExam();
+                  setMobileMenuOpen(false);
+                }}
                 className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm"
               >
                 <Plus size={18} />
@@ -1233,6 +1256,78 @@ const PassTracker = () => {
               </button>
             )}
           </div>
+
+          {mobileMenuOpen && (
+            <div className="space-y-3 border-t border-gray-200 pb-4 pt-3 lg:hidden">
+              <div className="flex flex-col gap-2">
+                {navTabs.map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      setMobileMenuOpen(false);
+                      if (tab.id === 'resources') setResourcePage('home');
+                    }}
+                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-left font-medium transition ${
+                      activeTab === tab.id
+                        ? 'bg-blue-600 text-white'
+                        : 'text-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    {tab.icon && <tab.icon size={18} />}
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {(activeTab === 'dashboard' || activeTab === 'tracker') && exams.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-gray-600">Exams</p>
+                  <div className="flex flex-col gap-2">
+                    {exams.map(exam => (
+                      <button
+                        key={exam.id}
+                        onClick={() => {
+                          setSelectedExam(exam.id);
+                          setMobileMenuOpen(false);
+                        }}
+                        className={`rounded-lg px-3 py-2 text-left font-medium transition ${
+                          selectedExam === exam.id
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        {exam.name}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => {
+                        addExam();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-2 font-medium text-gray-700 hover:bg-gray-100"
+                    >
+                      <Plus size={18} />
+                      <span>Add Exam</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab !== 'resources' && exams.length === 0 && (
+                <button
+                  onClick={() => {
+                    addExam();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition"
+                >
+                  <Plus size={18} />
+                  <span>Add Exam</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </nav>
 
