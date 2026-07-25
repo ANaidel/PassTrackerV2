@@ -130,6 +130,134 @@ const EditableTextInput = ({ value, onCommit, className = '', placeholder = '', 
   );
 };
 
+const CloudSyncPanel = ({
+  isSupabaseConfigured,
+  cloudUser,
+  cloudLoading,
+  cloudBusy,
+  cloudError,
+  cloudNotice,
+  cloudSyncedAt,
+  cloudConflict,
+  onSignIn,
+  onSignOut,
+  onRefresh,
+  onKeepCloudVersion,
+  onKeepLocalVersion,
+}) => {
+  const [email, setEmail] = useState('');
+
+  return (
+    <div className="bg-white p-6 rounded-lg border border-gray-200">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="max-w-2xl">
+          <div className="flex items-center gap-2">
+            <Cloud className="text-blue-600" size={20} />
+            <h2 className="text-xl font-bold">Cloud Sync</h2>
+          </div>
+          <p className="mt-2 text-sm text-gray-600">
+            Sign in once and your exams, lectures, resources, and theme will stay synced between devices.
+          </p>
+          {!isSupabaseConfigured && (
+            <p className="mt-2 text-sm text-amber-700">
+              Supabase is not configured yet. Add your URL and anon key to start syncing.
+            </p>
+          )}
+          {cloudNotice && <p className="mt-2 text-sm text-green-700">{cloudNotice}</p>}
+          {cloudError && <p className="mt-2 text-sm text-red-600">{cloudError}</p>}
+        </div>
+
+        <div className="flex flex-col gap-3">
+          {cloudUser ? (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                Signed in as <span className="font-semibold">{cloudUser.email}</span>
+              </div>
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={cloudBusy}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                Refresh now
+              </button>
+              <button
+                type="button"
+                onClick={onSignOut}
+                disabled={cloudBusy}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <LogOut size={16} />}
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
+                <Mail className="text-gray-400" size={16} />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email for magic link"
+                  className="w-64 bg-transparent outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => onSignIn(email)}
+                disabled={cloudBusy || !email.trim() || !isSupabaseConfigured}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                Send sign-in link
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {cloudLoading && (
+        <p className="mt-4 text-sm text-gray-500">Checking cloud session...</p>
+      )}
+      {cloudBusy && !cloudLoading && (
+        <p className="mt-4 text-sm text-gray-500">Syncing data...</p>
+      )}
+      {cloudConflict && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-900">Conflict detected</p>
+          <p className="mt-1 text-sm text-amber-800">
+            {cloudConflict.message || 'Your local changes and the cloud copy both changed since the last sync.'}
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={onKeepCloudVersion}
+              className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-700"
+            >
+              Use cloud version
+            </button>
+            <button
+              type="button"
+              onClick={onKeepLocalVersion}
+              disabled={cloudBusy}
+              className="inline-flex items-center justify-center rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Keep local version
+            </button>
+          </div>
+        </div>
+      )}
+      {cloudSyncedAt && (
+        <p className="mt-4 text-xs text-gray-500">
+          Last synced {new Date(cloudSyncedAt).toLocaleString()}
+        </p>
+      )}
+    </div>
+  );
+};
+
 const PassTracker = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [resourcePage, setResourcePage] = useState('home');
@@ -142,7 +270,6 @@ const PassTracker = () => {
   const [selectedExam, setSelectedExam] = useState(() => initialExams[0]?.id ?? null);
   const [expandedMaterials, setExpandedMaterials] = useState({});
   const [cloudUser, setCloudUser] = useState(null);
-  const [cloudEmail, setCloudEmail] = useState('');
   const [cloudLoading, setCloudLoading] = useState(isSupabaseConfigured);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState('');
@@ -264,15 +391,15 @@ const PassTracker = () => {
   const isDarkMode = theme === 'dark';
   const toggleTheme = () => setTheme(current => (current === 'dark' ? 'light' : 'dark'));
 
-  const handleCloudSignIn = async () => {
-    if (!supabase || !cloudEmail.trim()) return;
+  const handleCloudSignIn = async (email) => {
+    if (!supabase || !email?.trim()) return;
 
     setCloudBusy(true);
     setCloudError('');
     setCloudNotice('');
 
     const { error } = await supabase.auth.signInWithOtp({
-      email: cloudEmail.trim(),
+      email: email.trim(),
       options: {
         emailRedirectTo: window.location.origin,
       },
@@ -815,114 +942,6 @@ const PassTracker = () => {
           <p className="text-blue-100">Master Your Exam Prep</p>
         </div>
 
-        {/* Cloud Sync */}
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-2xl">
-              <div className="flex items-center gap-2">
-                <Cloud className="text-blue-600" size={20} />
-                <h2 className="text-xl font-bold">Cloud Sync</h2>
-              </div>
-              <p className="mt-2 text-sm text-gray-600">
-                Sign in once and your exams, lectures, resources, and theme will stay synced between devices.
-              </p>
-              {!isSupabaseConfigured && (
-                <p className="mt-2 text-sm text-amber-700">
-                  Supabase is not configured yet. Add your URL and anon key to start syncing.
-                </p>
-              )}
-              {cloudNotice && <p className="mt-2 text-sm text-green-700">{cloudNotice}</p>}
-              {cloudError && <p className="mt-2 text-sm text-red-600">{cloudError}</p>}
-            </div>
-
-            <div className="flex flex-col gap-3">
-              {cloudUser ? (
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                    Signed in as <span className="font-semibold">{cloudUser.email}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCloudRefresh}
-                    disabled={cloudBusy}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
-                    Refresh now
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCloudSignOut}
-                    disabled={cloudBusy}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <LogOut size={16} />}
-                    Sign out
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
-                    <Mail className="text-gray-400" size={16} />
-                    <input
-                      type="email"
-                      value={cloudEmail}
-                      onChange={(e) => setCloudEmail(e.target.value)}
-                      placeholder="Email for magic link"
-                      className="w-64 bg-transparent outline-none"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCloudSignIn}
-                    disabled={cloudBusy || !cloudEmail.trim() || !isSupabaseConfigured}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
-                    Send sign-in link
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-          {cloudLoading && (
-            <p className="mt-4 text-sm text-gray-500">Checking cloud session...</p>
-          )}
-          {cloudBusy && !cloudLoading && (
-            <p className="mt-4 text-sm text-gray-500">Syncing data...</p>
-          )}
-          {cloudConflict && (
-            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-              <p className="text-sm font-semibold text-amber-900">Conflict detected</p>
-              <p className="mt-1 text-sm text-amber-800">
-                {cloudConflict.message || 'Your local changes and the cloud copy both changed since the last sync.'}
-              </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={handleKeepCloudVersion}
-                  className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-700"
-                >
-                  Use cloud version
-                </button>
-                <button
-                  type="button"
-                  onClick={handleKeepLocalVersion}
-                  disabled={cloudBusy}
-                  className="inline-flex items-center justify-center rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Keep local version
-                </button>
-              </div>
-            </div>
-          )}
-          {cloudSyncedAt && (
-            <p className="mt-4 text-xs text-gray-500">
-              Last synced {new Date(cloudSyncedAt).toLocaleString()}
-            </p>
-          )}
-        </div>
-
         {/* Exam Setup */}
         <div className="bg-white p-6 rounded-lg border border-gray-200">
           <div className="flex justify-between items-center mb-4">
@@ -973,33 +992,33 @@ const PassTracker = () => {
 
         {/* Progress Overview */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border border-green-200">
+          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#173b3c] border-[#2a5060]' : 'bg-gradient-to-br from-green-50 to-green-100 border-green-200'}`}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Overall Progress</h3>
-              <TrendingUp className="text-green-600" size={24} />
+              <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Overall Progress</h3>
+              <TrendingUp className={isDarkMode ? 'text-green-300' : 'text-green-600'} size={24} />
             </div>
-            <div className="text-4xl font-bold text-green-700 mb-2">{progress}%</div>
-            <div className="w-full bg-green-200 rounded-full h-2">
-              <div className="bg-green-600 h-2 rounded-full" style={{ width: `${progress}%` }}></div>
+            <div className={`text-4xl font-bold mb-2 ${isDarkMode ? 'text-green-100' : 'text-green-700'}`}>{progress}%</div>
+            <div className={isDarkMode ? 'w-full bg-green-900/60 rounded-full h-2' : 'w-full bg-green-200 rounded-full h-2'}>
+              <div className={isDarkMode ? 'bg-green-400 h-2 rounded-full' : 'bg-green-600 h-2 rounded-full'} style={{ width: `${progress}%` }}></div>
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-lg border border-blue-200">
+          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#173046] border-[#2a5060]' : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200'}`}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Completed Tasks</h3>
-              <CheckCircle className="text-blue-600" size={24} />
+              <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Completed Tasks</h3>
+              <CheckCircle className={isDarkMode ? 'text-blue-300' : 'text-blue-600'} size={24} />
             </div>
-            <div className="text-4xl font-bold text-blue-700">{counts.complete}</div>
-            <p className="text-blue-600 text-sm mt-2">of {totalTasks} total</p>
+            <div className={`text-4xl font-bold ${isDarkMode ? 'text-blue-100' : 'text-blue-700'}`}>{counts.complete}</div>
+            <p className={isDarkMode ? 'text-blue-200 text-sm mt-2' : 'text-blue-600 text-sm mt-2'}>of {totalTasks} total</p>
           </div>
 
-          <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-lg border border-purple-200">
+          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#1b3142] border-[#2a5060]' : 'bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200'}`}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Materials</h3>
-              <BookOpen className="text-purple-600" size={24} />
+              <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Materials</h3>
+              <BookOpen className={isDarkMode ? 'text-purple-300' : 'text-purple-600'} size={24} />
             </div>
-            <div className="text-4xl font-bold text-purple-700">{currentExam.materials.length}</div>
-            <p className="text-purple-600 text-sm mt-2">topics covered</p>
+            <div className={`text-4xl font-bold ${isDarkMode ? 'text-purple-100' : 'text-purple-700'}`}>{currentExam.materials.length}</div>
+            <p className={isDarkMode ? 'text-purple-200 text-sm mt-2' : 'text-purple-600 text-sm mt-2'}>topics covered</p>
           </div>
         </div>
 
@@ -1714,6 +1733,21 @@ const PassTracker = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <CloudSyncPanel
+          isSupabaseConfigured={isSupabaseConfigured}
+          cloudUser={cloudUser}
+          cloudLoading={cloudLoading}
+          cloudBusy={cloudBusy}
+          cloudError={cloudError}
+          cloudNotice={cloudNotice}
+          cloudSyncedAt={cloudSyncedAt}
+          cloudConflict={cloudConflict}
+          onSignIn={handleCloudSignIn}
+          onSignOut={handleCloudSignOut}
+          onRefresh={handleCloudRefresh}
+          onKeepCloudVersion={handleKeepCloudVersion}
+          onKeepLocalVersion={handleKeepLocalVersion}
+        />
         {activeTab === 'dashboard' && <Dashboard />}
         {activeTab === 'tracker' && <ProgressTracker />}
         {activeTab === 'todo' && <TodoPage />}
