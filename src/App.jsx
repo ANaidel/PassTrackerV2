@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun } from 'lucide-react';
 
 const DEFAULT_TASK_TEMPLATES = [
   { label: 'Preview', offsetDays: -1 },
@@ -132,6 +132,7 @@ const EditableTextInput = ({ value, onCommit, className = '', placeholder = '', 
 const PassTracker = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [resourcePage, setResourcePage] = useState('home');
+  const [theme, setTheme] = useState(() => localStorage.getItem('passTrackerTheme') || 'light');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const initialTaskTemplates = loadTaskTemplates();
   const initialExams = loadExams(initialTaskTemplates);
@@ -165,6 +166,11 @@ const PassTracker = () => {
   }, [resources]);
 
   useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('passTrackerTheme', theme);
+  }, [theme]);
+
+  useEffect(() => {
     if (exams.length && !exams.some(e => e.id === selectedExam)) {
       setSelectedExam(exams[0].id);
     }
@@ -180,6 +186,23 @@ const PassTracker = () => {
     { id: 'todo', label: 'To Do' },
     { id: 'resources', label: 'Resources', icon: BookOpen }
   ];
+  const isDarkMode = theme === 'dark';
+  const toggleTheme = () => setTheme(current => (current === 'dark' ? 'light' : 'dark'));
+  const ThemeToggle = ({ className = '', compact = false } = {}) => (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      role="switch"
+      aria-checked={isDarkMode}
+      aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+      className={`inline-flex items-center gap-2 rounded-full border border-gray-300 bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-200 ${className}`}
+    >
+      <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-gray-700 shadow-sm transition ${isDarkMode ? 'translate-x-4' : ''}`}>
+        {isDarkMode ? <Moon size={14} /> : <Sun size={14} />}
+      </span>
+      {!compact && <span className="whitespace-nowrap">{isDarkMode ? 'Dark' : 'Light'}</span>}
+    </button>
+  );
 
   const addExam = () => {
     const id = Date.now();
@@ -1176,13 +1199,16 @@ const PassTracker = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between py-3 lg:hidden">
             <div className="text-2xl font-bold text-blue-600 whitespace-nowrap">PassTracker™</div>
-            <button
-              onClick={() => setMobileMenuOpen(prev => !prev)}
-              className="inline-flex items-center justify-center rounded-lg border border-gray-300 p-2 text-gray-700 hover:bg-gray-100"
-              aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
-            >
-              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-            </button>
+            <div className="flex items-center gap-2">
+              <ThemeToggle compact className="px-2 py-2" />
+              <button
+                onClick={() => setMobileMenuOpen(prev => !prev)}
+                className="inline-flex items-center justify-center rounded-lg border border-gray-300 p-2 text-gray-700 hover:bg-gray-100"
+                aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+              >
+                {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              </button>
+            </div>
           </div>
 
           <div className="hidden flex-col gap-3 py-3 lg:flex lg:flex-row lg:items-center lg:justify-between lg:py-0">
@@ -1212,49 +1238,52 @@ const PassTracker = () => {
               </div>
             </div>
 
-            {/* Exam Selector */}
-            {(activeTab === 'dashboard' || activeTab === 'tracker') && exams.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
-                {exams.map(exam => (
+            <div className="flex items-center gap-3">
+              <ThemeToggle className="hidden lg:inline-flex" />
+              {/* Exam Selector */}
+              {(activeTab === 'dashboard' || activeTab === 'tracker') && exams.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {exams.map(exam => (
+                    <button
+                      key={exam.id}
+                      onClick={() => {
+                        setSelectedExam(exam.id);
+                        setMobileMenuOpen(false);
+                      }}
+                      className={`px-4 py-2 rounded-lg font-medium transition whitespace-nowrap ${
+                        selectedExam === exam.id
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      {exam.name}
+                    </button>
+                  ))}
                   <button
-                    key={exam.id}
                     onClick={() => {
-                      setSelectedExam(exam.id);
+                      addExam();
                       setMobileMenuOpen(false);
                     }}
-                    className={`px-4 py-2 rounded-lg font-medium transition whitespace-nowrap ${
-                      selectedExam === exam.id
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'text-gray-600 hover:bg-gray-100'
-                    }`}
+                    className="px-3 py-2 rounded-lg font-medium transition text-gray-600 hover:bg-gray-100 border border-dashed border-gray-300"
+                    title="Add Exam"
                   >
-                    {exam.name}
+                    <Plus size={18} />
                   </button>
-                ))}
+                </div>
+              )}
+              {activeTab !== 'resources' && exams.length === 0 && (
                 <button
                   onClick={() => {
                     addExam();
                     setMobileMenuOpen(false);
                   }}
-                  className="px-3 py-2 rounded-lg font-medium transition text-gray-600 hover:bg-gray-100 border border-dashed border-gray-300"
-                  title="Add Exam"
+                  className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm"
                 >
                   <Plus size={18} />
+                  <span>Add Exam</span>
                 </button>
-              </div>
-            )}
-            {activeTab !== 'resources' && exams.length === 0 && (
-              <button
-                onClick={() => {
-                  addExam();
-                  setMobileMenuOpen(false);
-                }}
-                className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm"
-              >
-                <Plus size={18} />
-                <span>Add Exam</span>
-              </button>
-            )}
+              )}
+            </div>
           </div>
 
           {mobileMenuOpen && (
