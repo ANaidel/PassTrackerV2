@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 
 const DEFAULT_TASK_TEMPLATES = [
   { label: 'Preview', offsetDays: -1 },
@@ -140,6 +141,15 @@ const PassTracker = () => {
   const [exams, setExams] = useState(() => initialExams);
   const [selectedExam, setSelectedExam] = useState(() => initialExams[0]?.id ?? null);
   const [expandedMaterials, setExpandedMaterials] = useState({});
+  const [cloudUser, setCloudUser] = useState(null);
+  const [cloudEmail, setCloudEmail] = useState('');
+  const [cloudLoading, setCloudLoading] = useState(isSupabaseConfigured);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudError, setCloudError] = useState('');
+  const [cloudNotice, setCloudNotice] = useState('');
+  const [cloudSyncedAt, setCloudSyncedAt] = useState(null);
+  const [cloudConflict, setCloudConflict] = useState(null);
+  const lastSyncedPayloadRef = useRef('');
   const [resources, setResources] = useState(() => {
     const saved = localStorage.getItem('passTrackerResources');
     return saved ? JSON.parse(saved) : {
@@ -171,6 +181,71 @@ const PassTracker = () => {
   }, [theme]);
 
   useEffect(() => {
+    lastSyncedPayloadRef.current = JSON.stringify({
+      exams,
+      taskTemplates,
+      resources,
+      theme,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setCloudLoading(false);
+      return undefined;
+    }
+
+    let mounted = true;
+
+    const syncSession = async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (!mounted) return;
+      if (error) {
+        setCloudError(error.message);
+        setCloudLoading(false);
+        return;
+      }
+
+      setCloudUser(data.session?.user ?? null);
+      setCloudLoading(false);
+    };
+
+    syncSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCloudUser(session?.user ?? null);
+      setCloudLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!cloudUser || !supabase) return undefined;
+
+    fetchCloudState(cloudUser.id);
+  }, [cloudUser]);
+
+  useEffect(() => {
+    if (!cloudUser || !supabase || cloudLoading || cloudBusy || cloudConflict) return undefined;
+
+    const currentPayload = buildCurrentCloudPayload();
+    const currentSerialized = serializeCloudPayload(currentPayload);
+    if (currentSerialized === lastSyncedPayloadRef.current) {
+      return undefined;
+    }
+
+    const syncTimer = window.setTimeout(async () => {
+      await persistCloudPayload(currentPayload);
+    }, 900);
+
+    return () => window.clearTimeout(syncTimer);
+  }, [cloudUser, cloudLoading, cloudBusy, cloudConflict, exams, taskTemplates, resources, theme]);
+
+  useEffect(() => {
     if (exams.length && !exams.some(e => e.id === selectedExam)) {
       setSelectedExam(exams[0].id);
     }
@@ -188,19 +263,188 @@ const PassTracker = () => {
   ];
   const isDarkMode = theme === 'dark';
   const toggleTheme = () => setTheme(current => (current === 'dark' ? 'light' : 'dark'));
-  const ThemeToggle = ({ className = '', compact = false } = {}) => (
+
+  const handleCloudSignIn = async () => {
+    if (!supabase || !cloudEmail.trim()) return;
+
+    setCloudBusy(true);
+    setCloudError('');
+    setCloudNotice('');
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: cloudEmail.trim(),
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      setCloudError(error.message);
+      setCloudBusy(false);
+      return;
+    }
+
+    setCloudNotice('Check your email for the sign-in link.');
+    setCloudBusy(false);
+  };
+
+  const handleCloudSignOut = async () => {
+    if (!supabase) return;
+    setCloudBusy(true);
+    setCloudError('');
+    const { error } = await supabase.auth.signOut();
+    if (error) setCloudError(error.message);
+    setCloudBusy(false);
+    setCloudNotice('Signed out.');
+  };
+
+  const serializeCloudPayload = (payload) => JSON.stringify({
+    exams: payload.exams,
+    taskTemplates: payload.taskTemplates,
+    resources: payload.resources,
+    theme: payload.theme,
+  });
+
+  const buildCurrentCloudPayload = () => ({
+    exams,
+    taskTemplates,
+    resources,
+    theme,
+  });
+
+  const normalizeCloudPayload = (cloudState) => {
+    const nextTaskTemplates = Array.isArray(cloudState.taskTemplates) && cloudState.taskTemplates.length
+      ? cloneTaskTemplates(cloudState.taskTemplates)
+      : taskTemplates;
+
+    return {
+      exams: Array.isArray(cloudState.exams)
+        ? normalizeExamsData(cloudState.exams, nextTaskTemplates)
+        : exams,
+      taskTemplates: nextTaskTemplates,
+      resources: cloudState.resources && typeof cloudState.resources === 'object'
+        ? cloudState.resources
+        : resources,
+      theme: cloudState.theme === 'light' || cloudState.theme === 'dark'
+        ? cloudState.theme
+        : theme,
+    };
+  };
+
+  const applyCloudPayload = (payload, syncedAt) => {
+    setTaskTemplates(payload.taskTemplates);
+    setExams(payload.exams);
+    setResources(payload.resources);
+    setTheme(payload.theme);
+    lastSyncedPayloadRef.current = serializeCloudPayload(payload);
+    setCloudSyncedAt(syncedAt);
+    setCloudConflict(null);
+  };
+
+  const persistCloudPayload = async (payload, noticeMessage) => {
+    if (!supabase || !cloudUser) return false;
+
+    setCloudBusy(true);
+    setCloudError('');
+
+    const { data: savedRow, error } = await supabase.from('user_app_state').upsert({
+      user_id: cloudUser.id,
+      state: payload,
+      updated_at: new Date().toISOString(),
+    }).select('updated_at').single();
+
+    if (error) {
+      setCloudError(error.message);
+      setCloudBusy(false);
+      return false;
+    }
+
+    lastSyncedPayloadRef.current = serializeCloudPayload(payload);
+    setCloudSyncedAt(savedRow?.updated_at ?? new Date().toISOString());
+    setCloudConflict(null);
+
+    if (noticeMessage) {
+      setCloudNotice(noticeMessage);
+    }
+
+    setCloudBusy(false);
+    return true;
+  };
+
+  const fetchCloudState = async (userId) => {
+    if (!supabase || !userId) return;
+
+    setCloudBusy(true);
+    setCloudError('');
+
+    const { data, error } = await supabase
+      .from('user_app_state')
+      .select('state, updated_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      setCloudError(error.message);
+      setCloudBusy(false);
+      return;
+    }
+
+    const cloudState = data?.state;
+    if (cloudState && typeof cloudState === 'object') {
+      const normalizedRemote = normalizeCloudPayload(cloudState);
+      const currentSerialized = serializeCloudPayload(buildCurrentCloudPayload());
+      const remoteSerialized = serializeCloudPayload(normalizedRemote);
+      const baselineSerialized = lastSyncedPayloadRef.current;
+      const localDirty = currentSerialized !== baselineSerialized;
+      const remoteDirty = remoteSerialized !== baselineSerialized;
+
+      if (localDirty && remoteDirty) {
+        setCloudConflict({
+          payload: normalizedRemote,
+          updatedAt: data?.updated_at ?? new Date().toISOString(),
+          message: 'Both this device and the cloud changed since the last sync.',
+        });
+        setCloudNotice('Conflict detected. Choose which version to keep.');
+        setCloudBusy(false);
+        return;
+      }
+
+      applyCloudPayload(normalizedRemote, data?.updated_at ?? new Date().toISOString());
+      setCloudNotice('Cloud data loaded.');
+    } else {
+      setCloudNotice('Signed in. Your local changes will sync to the cloud.');
+    }
+
+    setCloudBusy(false);
+  };
+
+  const handleCloudRefresh = async () => {
+    if (!cloudUser) return;
+    await fetchCloudState(cloudUser.id);
+  };
+
+  const handleKeepCloudVersion = () => {
+    if (!cloudConflict) return;
+    applyCloudPayload(cloudConflict.payload, cloudConflict.updatedAt ?? new Date().toISOString());
+    setCloudNotice('Loaded the cloud version.');
+  };
+
+  const handleKeepLocalVersion = async () => {
+    if (!cloudConflict) return;
+    await persistCloudPayload(buildCurrentCloudPayload(), 'Kept the local version and updated the cloud copy.');
+  };
+
+  const ThemeToggle = ({ className = '' } = {}) => (
     <button
       type="button"
       onClick={toggleTheme}
       role="switch"
       aria-checked={isDarkMode}
       aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-      className={`inline-flex items-center gap-2 rounded-full border border-gray-300 bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-200 ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-100 px-2.5 py-2 text-gray-700 transition hover:bg-gray-200 ${className}`}
     >
-      <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-gray-700 shadow-sm transition ${isDarkMode ? 'translate-x-4' : ''}`}>
-        {isDarkMode ? <Moon size={14} /> : <Sun size={14} />}
-      </span>
-      {!compact && <span className="whitespace-nowrap">{isDarkMode ? 'Dark' : 'Light'}</span>}
+      <Sun size={15} className={isDarkMode ? 'text-gray-400' : 'text-amber-500'} />
+      <Moon size={15} className={isDarkMode ? 'text-blue-700' : 'text-gray-400'} />
     </button>
   );
 
@@ -569,6 +813,114 @@ const PassTracker = () => {
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-8 rounded-lg">
           <h1 className="text-4xl font-bold mb-2">PassTracker™ Command Center</h1>
           <p className="text-blue-100">Master Your Exam Prep</p>
+        </div>
+
+        {/* Cloud Sync */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="flex items-center gap-2">
+                <Cloud className="text-blue-600" size={20} />
+                <h2 className="text-xl font-bold">Cloud Sync</h2>
+              </div>
+              <p className="mt-2 text-sm text-gray-600">
+                Sign in once and your exams, lectures, resources, and theme will stay synced between devices.
+              </p>
+              {!isSupabaseConfigured && (
+                <p className="mt-2 text-sm text-amber-700">
+                  Supabase is not configured yet. Add your URL and anon key to start syncing.
+                </p>
+              )}
+              {cloudNotice && <p className="mt-2 text-sm text-green-700">{cloudNotice}</p>}
+              {cloudError && <p className="mt-2 text-sm text-red-600">{cloudError}</p>}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {cloudUser ? (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                    Signed in as <span className="font-semibold">{cloudUser.email}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCloudRefresh}
+                    disabled={cloudBusy}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                    Refresh now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCloudSignOut}
+                    disabled={cloudBusy}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <LogOut size={16} />}
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
+                    <Mail className="text-gray-400" size={16} />
+                    <input
+                      type="email"
+                      value={cloudEmail}
+                      onChange={(e) => setCloudEmail(e.target.value)}
+                      placeholder="Email for magic link"
+                      className="w-64 bg-transparent outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCloudSignIn}
+                    disabled={cloudBusy || !cloudEmail.trim() || !isSupabaseConfigured}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                    Send sign-in link
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          {cloudLoading && (
+            <p className="mt-4 text-sm text-gray-500">Checking cloud session...</p>
+          )}
+          {cloudBusy && !cloudLoading && (
+            <p className="mt-4 text-sm text-gray-500">Syncing data...</p>
+          )}
+          {cloudConflict && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-semibold text-amber-900">Conflict detected</p>
+              <p className="mt-1 text-sm text-amber-800">
+                {cloudConflict.message || 'Your local changes and the cloud copy both changed since the last sync.'}
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleKeepCloudVersion}
+                  className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-700"
+                >
+                  Use cloud version
+                </button>
+                <button
+                  type="button"
+                  onClick={handleKeepLocalVersion}
+                  disabled={cloudBusy}
+                  className="inline-flex items-center justify-center rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Keep local version
+                </button>
+              </div>
+            </div>
+          )}
+          {cloudSyncedAt && (
+            <p className="mt-4 text-xs text-gray-500">
+              Last synced {new Date(cloudSyncedAt).toLocaleString()}
+            </p>
+          )}
         </div>
 
         {/* Exam Setup */}
@@ -1200,7 +1552,7 @@ const PassTracker = () => {
           <div className="flex items-center justify-between py-3 lg:hidden">
             <div className="text-2xl font-bold text-blue-600 whitespace-nowrap">PassTracker™</div>
             <div className="flex items-center gap-2">
-              <ThemeToggle compact className="px-2 py-2" />
+              <ThemeToggle className="shrink-0" />
               <button
                 onClick={() => setMobileMenuOpen(prev => !prev)}
                 className="inline-flex items-center justify-center rounded-lg border border-gray-300 p-2 text-gray-700 hover:bg-gray-100"
@@ -1238,8 +1590,8 @@ const PassTracker = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <ThemeToggle className="hidden lg:inline-flex" />
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <ThemeToggle className="hidden lg:inline-flex shrink-0" />
               {/* Exam Selector */}
               {(activeTab === 'dashboard' || activeTab === 'tracker') && exams.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
