@@ -266,32 +266,35 @@ const CloudSyncPanel = ({
                 />
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setPendingAction('signin');
-                    await onPasswordSignIn(email, password);
-                    setPendingAction(null);
-                  }}
-                  disabled={cloudBusy || !email.trim() || !password || !isSupabaseConfigured}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {cloudBusy || pendingAction === 'signin' ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
-                  {pendingAction === 'signin' ? 'Signing in...' : 'Sign in'}
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setPendingAction('signup');
-                    await onPasswordSignUp(email, password, username);
-                    setPendingAction(null);
-                  }}
-                  disabled={cloudBusy || !email.trim() || !password || !username.trim() || !isSupabaseConfigured}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {cloudBusy || pendingAction === 'signup' ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
-                  {pendingAction === 'signup' ? 'Creating...' : 'Create account'}
-                </button>
+                {authMode === 'signin' ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setPendingAction('signin');
+                      await onPasswordSignIn(email, password);
+                      setPendingAction(null);
+                    }}
+                    disabled={cloudBusy || !email.trim() || !password || !isSupabaseConfigured}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cloudBusy || pendingAction === 'signin' ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                    {pendingAction === 'signin' ? 'Signing in...' : 'Sign in'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setPendingAction('signup');
+                      await onPasswordSignUp(email, password, username);
+                      setPendingAction(null);
+                    }}
+                    disabled={cloudBusy || !email.trim() || !password || !username.trim() || !isSupabaseConfigured}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cloudBusy || pendingAction === 'signup' ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                    {pendingAction === 'signup' ? 'Creating...' : 'Create account'}
+                  </button>
+                )}
               </div>
               {pendingAction && (
                 <p className="text-sm text-gray-600">
@@ -301,6 +304,16 @@ const CloudSyncPanel = ({
               <p className="text-xs text-gray-500">
                 Use the same email and password each time. New accounts also store the username in your profile.
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode(current => (current === 'signin' ? 'signup' : 'signin'));
+                  setPendingAction(null);
+                }}
+                className="text-xs font-medium text-blue-700 hover:text-blue-800"
+              >
+                {authMode === 'signin' ? 'Need an account? Create one' : 'Already have an account? Sign in'}
+              </button>
             </div>
           )}
         </div>
