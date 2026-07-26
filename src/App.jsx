@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Fragment, useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 
@@ -68,16 +68,25 @@ const normalizeTasksForTemplates = (rawTasks, templates, excludedTasks = []) => 
   return tasks;
 };
 
+const compareByDateAsc = (a, b) => {
+  if (!a?.date && !b?.date) return 0;
+  if (!a?.date) return 1;
+  if (!b?.date) return -1;
+  return String(a.date).localeCompare(String(b.date));
+};
+
+const sortByDateAsc = (items) => [...(items || [])].sort(compareByDateAsc);
+
 const normalizeExamsData = (examList, templates) =>
-  examList.map(exam => ({
+  sortByDateAsc(examList.map(exam => ({
     ...exam,
-    materials: (exam.materials || []).map(material => ({
+    materials: sortByDateAsc((exam.materials || []).map(material => ({
       ...material,
       excludedTasks: Array.isArray(material.excludedTasks) ? material.excludedTasks : [],
       name: material.name === 'New Material' || !material.name ? 'Lecture Name' : material.name,
       tasks: normalizeTasksForTemplates(material.tasks, templates, Array.isArray(material.excludedTasks) ? material.excludedTasks : []),
-    })),
-  }));
+    }))),
+  })));
 
 const loadExams = (templates) => {
   const saved = localStorage.getItem('passTrackerExams');
@@ -98,15 +107,6 @@ const loadExams = (templates) => {
     return [{ id: 1, name: 'Exam 1', date: '', materials: [] }];
   }
 };
-
-const compareByDateAsc = (a, b) => {
-  if (!a?.date && !b?.date) return 0;
-  if (!a?.date) return 1;
-  if (!b?.date) return -1;
-  return String(a.date).localeCompare(String(b.date));
-};
-
-const sortByDateAsc = (items) => [...(items || [])].sort(compareByDateAsc);
 
 const EditableTextInput = ({ value, onCommit, className = '', placeholder = '', type = 'text' }) => {
   const [draft, setDraft] = useState(value ?? '');
@@ -1146,159 +1146,161 @@ const PassTracker = () => {
       }));
     };
 
+    const sortedMaterials = sortByDateAsc(exam.materials);
+
     return (
-      <div className="space-y-4 bg-white p-6 rounded-lg border border-gray-200">
-        <div className="flex justify-between items-center mb-6">
+      <div className="space-y-3 bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
+        <div className="flex justify-between items-center gap-3">
           <h2 className="text-2xl font-bold">{exam.name} Materials</h2>
           <button
             onClick={() => addMaterial(exam.id)}
-            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+            className="inline-flex items-center space-x-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition text-sm shrink-0"
           >
-            <Plus size={20} />
+            <Plus size={16} />
             <span>Add Lecture</span>
           </button>
         </div>
 
-        {exam.materials.length === 0 ? (
-          <div className="bg-gray-50 p-12 rounded-lg text-center">
-            <BookOpen className="mx-auto text-gray-400 mb-4" size={48} />
-            <p className="text-gray-600 mb-4">No lectures added yet</p>
-            <button
-              onClick={() => addMaterial(exam.id)}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
-            >
-              Add Your First Lecture
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {exam.materials.map(material => {
-              const isExpanded = expandedMaterials[`${exam.id}-${material.id}`] ?? false;
-              return (
-                <div key={material.id} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                  <div className="p-4 bg-gray-50 border-b border-gray-200">
-                    <div className="flex flex-col gap-4">
-                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Lecture Name</label>
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 text-left text-gray-600">
+              <tr>
+                <th className="px-3 py-2 font-medium">Lecture Name</th>
+                <th className="px-3 py-2 font-medium whitespace-nowrap">Date</th>
+                <th className="px-3 py-2 font-medium">Difficulty</th>
+                <th className="px-3 py-2 font-medium">Current Task</th>
+                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedMaterials.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-3 py-8 text-center text-gray-600">
+                    No lectures added yet. Use Add Lecture to create one.
+                  </td>
+                </tr>
+              ) : (
+                sortedMaterials.map(material => {
+                  const isExpanded = expandedMaterials[`${exam.id}-${material.id}`] ?? false;
+                  const activeLabels = getActiveTaskLabels(material);
+                  const completedCount = activeLabels.filter(taskType => material.tasks[taskType] === 'Complete').length;
+                  const progressPercent = activeLabels.length === 0
+                    ? 0
+                    : Math.round((completedCount / activeLabels.length) * 100);
+
+                  return (
+                    <Fragment key={material.id}>
+                      <tr className="border-t border-gray-200">
+                        <td className="px-3 py-2 align-middle">
                           <EditableTextInput
                             value={material.name}
                             onCommit={(next) => updateMaterial(exam.id, material.id, 'name', next)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full min-w-[140px] px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
-                        </div>
-                        <div className="min-w-[220px] rounded-lg border border-blue-200 bg-blue-50 p-3">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 mb-1">Current task</p>
-                          <p className="text-sm font-medium text-blue-900">{getTaskSummary(material)}</p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                        </td>
+                        <td className="px-3 py-2 align-middle">
                           <input
                             type="date"
                             value={material.date}
                             onChange={(e) => updateMaterial(exam.id, material.id, 'date', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full min-w-[140px] px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Difficulty</label>
+                        </td>
+                        <td className="px-3 py-2 align-middle">
                           <select
                             value={material.difficulty}
                             onChange={(e) => updateMaterial(exam.id, material.id, 'difficulty', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full min-w-[110px] px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <option>Easy</option>
                             <option>Medium</option>
                             <option>Hard</option>
                           </select>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3">
-                        <button
-                          onClick={() => toggleMaterial(material.id)}
-                          className="text-sm font-medium text-blue-600 hover:text-blue-800"
-                        >
-                          {isExpanded ? 'Hide Lecture Tasks' : 'Show Lecture Tasks'}
-                        </button>
-                        <button
-                          onClick={() => deleteMaterial(exam.id, material.id)}
-                          className="flex items-center space-x-1 text-red-600 hover:text-red-700 transition"
-                        >
-                          <Trash2 size={18} />
-                          <span>Delete</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {isExpanded && (
-                    <div className="p-4">
-                      {getActiveTaskLabels(material).length === 0 ? (
-                        <p className="text-sm text-gray-600">All tasks have been removed from this lecture.</p>
-                      ) : (
-                        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-                          {getActiveTaskLabels(material).map(type => (
-                            <div key={type} className="rounded-lg border border-gray-200 bg-white p-2">
-                              <div className="mb-1 flex items-center justify-between gap-2">
-                                <label className="block text-xs font-medium text-gray-600">{type}</label>
-                                <button
-                                  onClick={() => removeTaskFromLecture(exam.id, material.id, type)}
-                                  className="text-[11px] font-medium text-red-600 hover:text-red-700 transition"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                              <select
-                                value={material.tasks[type]}
-                                onChange={(e) => updateTask(exam.id, material.id, type, e.target.value)}
-                                className={`w-full px-2 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                  material.tasks[type] === 'Complete'
-                                    ? 'bg-green-50 border-green-300 text-green-700 font-medium'
-                                    : material.tasks[type] === 'In Progress'
-                                    ? 'bg-yellow-50 border-yellow-300 text-yellow-700'
-                                    : 'bg-gray-50 border-gray-300 text-gray-700'
-                                }`}
-                              >
-                                <option>Not Started</option>
-                                <option>In Progress</option>
-                                <option>Complete</option>
-                              </select>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="mt-4">
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-600">Progress:</span>
-                          <span className="font-semibold text-gray-900">
-                            {getActiveTaskLabels(material).length === 0
-                              ? '0%'
-                              : `${Math.round((getActiveTaskLabels(material).filter(taskType => material.tasks[taskType] === 'Complete').length / getActiveTaskLabels(material).length) * 100)}%`}
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          <span className="inline-flex rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-900">
+                            {getTaskSummary(material)}
                           </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-blue-600 h-2 rounded-full transition-all"
-                            style={{
-                              width: `${getActiveTaskLabels(material).length === 0
-                                ? 0
-                                : (getActiveTaskLabels(material).filter(taskType => material.tasks[taskType] === 'Complete').length / getActiveTaskLabels(material).length) * 100}%`
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          <div className="flex items-center justify-end gap-3">
+                            <button
+                              onClick={() => toggleMaterial(material.id)}
+                              className="text-sm font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                            >
+                              {isExpanded ? 'Hide Tasks' : 'Show Tasks'}
+                            </button>
+                            <button
+                              onClick={() => deleteMaterial(exam.id, material.id)}
+                              className="inline-flex items-center space-x-1 text-red-600 hover:text-red-700 transition"
+                              title="Delete lecture"
+                            >
+                              <Trash2 size={16} />
+                              <span className="hidden sm:inline">Delete</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="border-t border-gray-100 bg-gray-50">
+                          <td colSpan={5} className="px-3 py-3">
+                            {activeLabels.length === 0 ? (
+                              <p className="text-sm text-gray-600">All tasks have been removed from this lecture.</p>
+                            ) : (
+                              <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                                {activeLabels.map(type => (
+                                  <div key={type} className="rounded-lg border border-gray-200 bg-white p-2">
+                                    <div className="mb-1 flex items-center justify-between gap-2">
+                                      <label className="block text-xs font-medium text-gray-600">{type}</label>
+                                      <button
+                                        onClick={() => removeTaskFromLecture(exam.id, material.id, type)}
+                                        className="text-[11px] font-medium text-red-600 hover:text-red-700 transition"
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                    <select
+                                      value={material.tasks[type]}
+                                      onChange={(e) => updateTask(exam.id, material.id, type, e.target.value)}
+                                      className={`w-full px-2 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                        material.tasks[type] === 'Complete'
+                                          ? 'bg-green-50 border-green-300 text-green-700 font-medium'
+                                          : material.tasks[type] === 'In Progress'
+                                          ? 'bg-yellow-50 border-yellow-300 text-yellow-700'
+                                          : 'bg-gray-50 border-gray-300 text-gray-700'
+                                      }`}
+                                    >
+                                      <option>Not Started</option>
+                                      <option>In Progress</option>
+                                      <option>Complete</option>
+                                    </select>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="mt-3">
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="text-gray-600">Progress:</span>
+                                <span className="font-semibold text-gray-900">{progressPercent}%</span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div
+                                  className="bg-blue-600 h-2 rounded-full transition-all"
+                                  style={{ width: `${progressPercent}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   };
@@ -1681,9 +1683,9 @@ const PassTracker = () => {
             <div className="flex flex-wrap items-center justify-end gap-3">
               <ThemeToggle className="hidden lg:inline-flex shrink-0" />
               {/* Exam Selector */}
-              {(activeTab === 'dashboard' || activeTab === 'tracker') && exams.length > 0 && (
+              {(activeTab === 'dashboard' || activeTab === 'tracker') && sortedExams.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
-                  {exams.map(exam => (
+                  {sortedExams.map(exam => (
                     <button
                       key={exam.id}
                       onClick={() => {
@@ -1711,7 +1713,7 @@ const PassTracker = () => {
                   </button>
                 </div>
               )}
-              {activeTab !== 'resources' && exams.length === 0 && (
+              {activeTab !== 'resources' && sortedExams.length === 0 && (
                 <button
                   onClick={() => {
                     addExam();
@@ -1749,11 +1751,11 @@ const PassTracker = () => {
                 ))}
               </div>
 
-              {(activeTab === 'dashboard' || activeTab === 'tracker') && exams.length > 0 && (
+              {(activeTab === 'dashboard' || activeTab === 'tracker') && sortedExams.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-gray-600">Exams</p>
                   <div className="flex flex-col gap-2">
-                    {exams.map(exam => (
+                    {sortedExams.map(exam => (
                       <button
                         key={exam.id}
                         onClick={() => {
@@ -1783,7 +1785,7 @@ const PassTracker = () => {
                 </div>
               )}
 
-              {activeTab !== 'resources' && exams.length === 0 && (
+              {activeTab !== 'resources' && sortedExams.length === 0 && (
                 <button
                   onClick={() => {
                     addExam();
