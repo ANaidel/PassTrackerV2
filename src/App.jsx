@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 
 const DEFAULT_TASK_TEMPLATES = [
@@ -99,6 +99,15 @@ const loadExams = (templates) => {
   }
 };
 
+const compareByDateAsc = (a, b) => {
+  if (!a?.date && !b?.date) return 0;
+  if (!a?.date) return 1;
+  if (!b?.date) return -1;
+  return String(a.date).localeCompare(String(b.date));
+};
+
+const sortByDateAsc = (items) => [...(items || [])].sort(compareByDateAsc);
+
 const EditableTextInput = ({ value, onCommit, className = '', placeholder = '', type = 'text' }) => {
   const [draft, setDraft] = useState(value ?? '');
 
@@ -146,6 +155,7 @@ const CloudSyncPanel = ({
   onKeepLocalVersion,
 }) => {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -193,26 +203,50 @@ const CloudSyncPanel = ({
               </button>
             </div>
           ) : (
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="max-w-md space-y-3">
               <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
                 <Mail className="text-gray-400" size={16} />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email for magic link"
-                  className="w-64 bg-transparent outline-none"
+                  placeholder="Email"
+                  className="w-full bg-transparent outline-none"
                 />
               </div>
-              <button
-                type="button"
-                onClick={() => onSignIn(email)}
-                disabled={cloudBusy || !email.trim() || !isSupabaseConfigured}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
-                Send sign-in link
-              </button>
+              <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
+                <Lock className="text-gray-400" size={16} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  className="w-full bg-transparent outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => onPasswordSignIn(email, password)}
+                  disabled={cloudBusy || !email.trim() || !password || !isSupabaseConfigured}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPasswordSignUp(email, password)}
+                  disabled={cloudBusy || !email.trim() || !password || !isSupabaseConfigured}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                  Create account
+                </button>
+              </div>
+              <p className="text-xs text-gray-500">
+                Use the same email and password each time. If email confirmation is enabled in Supabase, you may still need to verify once by email.
+              </p>
             </div>
           )}
         </div>
@@ -391,15 +425,38 @@ const PassTracker = () => {
   const isDarkMode = theme === 'dark';
   const toggleTheme = () => setTheme(current => (current === 'dark' ? 'light' : 'dark'));
 
-  const handleCloudSignIn = async (email) => {
-    if (!supabase || !email?.trim()) return;
+  const handleCloudPasswordSignIn = async (email, password) => {
+    if (!supabase || !email?.trim() || !password) return;
 
     setCloudBusy(true);
     setCloudError('');
     setCloudNotice('');
 
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
+      password,
+    });
+
+    if (error) {
+      setCloudError(error.message);
+      setCloudBusy(false);
+      return;
+    }
+
+    setCloudNotice('Signed in successfully.');
+    setCloudBusy(false);
+  };
+
+  const handleCloudPasswordSignUp = async (email, password) => {
+    if (!supabase || !email?.trim() || !password) return;
+
+    setCloudBusy(true);
+    setCloudError('');
+    setCloudNotice('');
+
+    const { error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
       options: {
         emailRedirectTo: window.location.origin,
       },
@@ -411,7 +468,7 @@ const PassTracker = () => {
       return;
     }
 
-    setCloudNotice('Check your email for the sign-in link.');
+    setCloudNotice('Account created. Check your email if confirmation is enabled, or sign in now.');
     setCloudBusy(false);
   };
 
@@ -577,7 +634,7 @@ const PassTracker = () => {
 
   const addExam = () => {
     const id = Date.now();
-    setExams(prev => [...prev, { id, name: 'New Exam', date: '', materials: [] }]);
+    setExams(prev => sortByDateAsc([...prev, { id, name: 'New Exam', date: '', materials: [] }]));
     setSelectedExam(id);
   };
 
@@ -603,30 +660,30 @@ const PassTracker = () => {
       e.id === targetId
         ? {
             ...e,
-            materials: [...e.materials, {
+            materials: sortByDateAsc([...e.materials, {
               id: Date.now(),
               name: 'Lecture Name',
               date: new Date().toISOString().split('T')[0],
               difficulty: 'Medium',
               excludedTasks: [],
               tasks: taskTypes.reduce((acc, type) => ({ ...acc, [type]: 'Not Started' }), {})
-            }]
+            }])
           }
         : e
     ));
   };
 
   const updateMaterial = (examId, materialId, field, value) => {
-    setExams(prev => prev.map(e =>
-      e.id === examId
-        ? {
-            ...e,
-            materials: e.materials.map(m =>
-              m.id === materialId ? { ...m, [field]: value } : m
-            )
-          }
-        : e
-    ));
+    setExams(prev => prev.map(e => {
+      if (e.id !== examId) return e;
+      const materials = e.materials.map(m =>
+        m.id === materialId ? { ...m, [field]: value } : m
+      );
+      return {
+        ...e,
+        materials: field === 'date' ? sortByDateAsc(materials) : materials,
+      };
+    }));
   };
 
   const updateTask = (examId, materialId, taskType, status) => {
@@ -651,8 +708,10 @@ const PassTracker = () => {
   };
 
   const updateExamDate = (examId, date) => {
-    setExams(prev => prev.map(e => e.id === examId ? { ...e, date } : e));
+    setExams(prev => sortByDateAsc(prev.map(e => e.id === examId ? { ...e, date } : e)));
   };
+
+  const sortedExams = sortByDateAsc(exams);
 
   const completeTask = (examId, materialId, taskType) => {
     updateTask(examId, materialId, taskType, 'Complete');
@@ -943,50 +1002,60 @@ const PassTracker = () => {
         </div>
 
         {/* Exam Setup */}
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="flex justify-between items-center mb-4">
+        <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
+          <div className="flex justify-between items-center gap-3 mb-3">
             <h2 className="text-xl font-bold">Exam Setup</h2>
             <button
               onClick={addExam}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm"
+              className="inline-flex items-center space-x-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition text-sm shrink-0"
             >
-              <Plus size={18} />
+              <Plus size={16} />
               <span>Add Exam</span>
             </button>
           </div>
-          <div className="space-y-4">
-            {exams.map(exam => (
-              <div key={exam.id} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Exam Name</label>
-                  <EditableTextInput
-                    value={exam.name}
-                    onCommit={(next) => updateExamName(exam.id, next)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Exam Date</label>
-                  <input
-                    type="date"
-                    value={exam.date}
-                    onChange={(e) => updateExamDate(exam.id, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="flex items-end">
-                  {exams.length > 1 && (
-                    <button
-                      onClick={() => deleteExam(exam.id)}
-                      className="flex items-center space-x-1 text-red-600 hover:text-red-700 transition text-sm font-medium"
-                    >
-                      <Trash2 size={16} />
-                      <span>Remove Exam</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-left text-gray-600">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Exam Name</th>
+                  <th className="px-3 py-2 font-medium whitespace-nowrap">Exam Date</th>
+                  <th className="px-3 py-2 font-medium text-right w-24">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedExams.map(exam => (
+                  <tr key={exam.id} className="border-t border-gray-200">
+                    <td className="px-3 py-2 align-middle">
+                      <EditableTextInput
+                        value={exam.name}
+                        onCommit={(next) => updateExamName(exam.id, next)}
+                        className="w-full min-w-[140px] px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-3 py-2 align-middle">
+                      <input
+                        type="date"
+                        value={exam.date}
+                        onChange={(e) => updateExamDate(exam.id, e.target.value)}
+                        className="w-full min-w-[140px] px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-3 py-2 align-middle text-right">
+                      {exams.length > 1 && (
+                        <button
+                          onClick={() => deleteExam(exam.id)}
+                          className="inline-flex items-center space-x-1 text-red-600 hover:text-red-700 transition text-sm font-medium"
+                          title="Remove Exam"
+                        >
+                          <Trash2 size={16} />
+                          <span className="hidden sm:inline">Remove</span>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -1742,7 +1811,8 @@ const PassTracker = () => {
           cloudNotice={cloudNotice}
           cloudSyncedAt={cloudSyncedAt}
           cloudConflict={cloudConflict}
-          onSignIn={handleCloudSignIn}
+          onPasswordSignIn={handleCloudPasswordSignIn}
+          onPasswordSignUp={handleCloudPasswordSignUp}
           onSignOut={handleCloudSignOut}
           onRefresh={handleCloudRefresh}
           onKeepCloudVersion={handleKeepCloudVersion}
