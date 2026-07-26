@@ -1,5 +1,5 @@
 import React, { Fragment, useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User, ChevronDown } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 
 const DEFAULT_TASK_TEMPLATES = [
@@ -558,6 +558,23 @@ const PassTracker = () => {
   const [taskTemplates, setTaskTemplates] = useState(() => initialTaskTemplates);
   const [exams, setExams] = useState(() => initialExams);
   const [selectedExam, setSelectedExam] = useState(() => initialExams[0]?.id ?? null);
+  const [todoExamIds, setTodoExamIds] = useState(() => {
+    const saved = localStorage.getItem('passTrackerTodoExamIds');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch {
+        // Fall through to default selection.
+      }
+    }
+    return initialExams.map(exam => exam.id);
+  });
+  const [todoExamMenuOpen, setTodoExamMenuOpen] = useState(false);
+  const todoExamMenuRef = useRef(null);
+  const knownTodoExamIdsRef = useRef(new Set(initialExams.map(exam => exam.id)));
   const [expandedMaterials, setExpandedMaterials] = useState({});
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudLoading, setCloudLoading] = useState(isSupabaseConfigured);
@@ -662,6 +679,35 @@ const PassTracker = () => {
     }
   }, [exams, selectedExam]);
 
+  useEffect(() => {
+    setTodoExamIds(prev => {
+      const examIds = exams.map(exam => exam.id);
+      const examIdSet = new Set(examIds);
+      const knownIds = knownTodoExamIdsRef.current;
+      const kept = prev.filter(id => examIdSet.has(id));
+      const newlyAdded = examIds.filter(id => !knownIds.has(id));
+      knownTodoExamIdsRef.current = examIdSet;
+      return [...kept, ...newlyAdded];
+    });
+  }, [exams]);
+
+  useEffect(() => {
+    localStorage.setItem('passTrackerTodoExamIds', JSON.stringify(todoExamIds));
+  }, [todoExamIds]);
+
+  useEffect(() => {
+    if (!todoExamMenuOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (todoExamMenuRef.current && !todoExamMenuRef.current.contains(event.target)) {
+        setTodoExamMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [todoExamMenuOpen]);
+
   const currentExam = exams.find(e => e.id === selectedExam) ?? exams[0];
 
   const taskTypes = taskTemplates.map(template => template.label);
@@ -744,6 +790,9 @@ const PassTracker = () => {
     setExams(nextExams);
     setResources(nextResources);
     setSelectedExam(nextExams[0]?.id ?? null);
+    setTodoExamIds(nextExams.map(exam => exam.id));
+    knownTodoExamIdsRef.current = new Set(nextExams.map(exam => exam.id));
+    setTodoExamMenuOpen(false);
     setExpandedMaterials({});
     setCloudSyncedAt(null);
     setCloudConflict(null);
@@ -753,6 +802,7 @@ const PassTracker = () => {
     localStorage.setItem('passTrackerExams', JSON.stringify(nextExams));
     localStorage.setItem('passTrackerTaskTemplates', JSON.stringify(nextTemplates));
     localStorage.setItem('passTrackerResources', JSON.stringify(nextResources));
+    localStorage.setItem('passTrackerTodoExamIds', JSON.stringify(nextExams.map(exam => exam.id)));
   };
 
   const handleCloudSignOut = async () => {
@@ -1121,6 +1171,15 @@ const PassTracker = () => {
     return taskTypes.filter(taskType => !excludedTasks.has(taskType) && Object.prototype.hasOwnProperty.call(material.tasks || {}, taskType));
   };
 
+  const isActiveExam = (exam) => {
+    if (!exam?.date) return true;
+    const examDate = new Date(`${exam.date}T00:00:00`);
+    if (Number.isNaN(examDate.getTime())) return true;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return examDate >= today;
+  };
+
   const calculateProgress = (materials) => {
     if (materials.length === 0) return 0;
     const totalTasks = materials.reduce((acc, material) => acc + getActiveTaskLabels(material).length, 0);
@@ -1133,11 +1192,12 @@ const PassTracker = () => {
 
   const getTaskCounts = (materials) => {
     const counts = { complete: 0, inProgress: 0, notStarted: 0 };
-    materials.forEach(m => {
-      Object.values(m.tasks).forEach(status => {
-        if (status === 'Complete') counts.complete++;
-        else if (status === 'In Progress') counts.inProgress++;
-        else counts.notStarted++;
+    materials.forEach(material => {
+      getActiveTaskLabels(material).forEach(taskType => {
+        const status = material.tasks?.[taskType] || 'Not Started';
+        if (status === 'Complete') counts.complete += 1;
+        else if (status === 'In Progress') counts.inProgress += 1;
+        else counts.notStarted += 1;
       });
     });
     return counts;
@@ -1183,13 +1243,16 @@ const PassTracker = () => {
     return `Next: ${items[0].taskType}`;
   };
 
-  const buildTodoItems = () => {
+  const buildTodoItems = (examIds = todoExamIds) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const upcomingCutoff = new Date(today);
     upcomingCutoff.setDate(upcomingCutoff.getDate() + 2);
+    const selectedIds = new Set(examIds);
 
-    const items = exams.flatMap(exam =>
+    const items = exams
+      .filter(exam => selectedIds.has(exam.id))
+      .flatMap(exam =>
       exam.materials.flatMap(material =>
         getActiveTaskLabels(material)
           .filter(taskType => material.tasks?.[taskType] !== 'Complete')
@@ -1317,8 +1380,13 @@ const PassTracker = () => {
 
   const Dashboard = () => {
     const [showTaskSetup, setShowTaskSetup] = useState(false);
+    const activeExams = sortByDateAsc(exams.filter(isActiveExam));
+    const activeMaterials = activeExams.flatMap(exam => exam.materials || []);
+    const progress = calculateProgress(activeMaterials);
+    const counts = getTaskCounts(activeMaterials);
+    const totalTasks = counts.complete + counts.inProgress + counts.notStarted;
 
-    if (!currentExam) {
+    if (exams.length === 0) {
       return (
         <div className="bg-white p-12 rounded-lg border border-gray-200 text-center">
           <p className="text-gray-600 mb-4">No exams yet. Add one to get started.</p>
@@ -1332,10 +1400,6 @@ const PassTracker = () => {
         </div>
       );
     }
-
-    const progress = calculateProgress(currentExam.materials);
-    const counts = getTaskCounts(currentExam.materials);
-    const totalTasks = currentExam.materials.length * taskTypes.length;
 
     return (
       <div className="space-y-6">
@@ -1414,6 +1478,9 @@ const PassTracker = () => {
             <div className={isDarkMode ? 'w-full bg-green-900/60 rounded-full h-2' : 'w-full bg-green-200 rounded-full h-2'}>
               <div className={isDarkMode ? 'bg-green-400 h-2 rounded-full' : 'bg-green-600 h-2 rounded-full'} style={{ width: `${progress}%` }}></div>
             </div>
+            <p className={isDarkMode ? 'text-green-200 text-sm mt-2' : 'text-green-700 text-sm mt-2'}>
+              Across {activeExams.length} active exam{activeExams.length === 1 ? '' : 's'}
+            </p>
           </div>
 
           <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#173046] border-[#2a5060]' : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200'}`}>
@@ -1430,9 +1497,53 @@ const PassTracker = () => {
               <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Materials</h3>
               <BookOpen className={isDarkMode ? 'text-purple-300' : 'text-purple-600'} size={24} />
             </div>
-            <div className={`text-4xl font-bold ${isDarkMode ? 'text-purple-100' : 'text-purple-700'}`}>{currentExam.materials.length}</div>
+            <div className={`text-4xl font-bold ${isDarkMode ? 'text-purple-100' : 'text-purple-700'}`}>{activeMaterials.length}</div>
             <p className={isDarkMode ? 'text-purple-200 text-sm mt-2' : 'text-purple-600 text-sm mt-2'}>topics covered</p>
           </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg border border-gray-200">
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold">Active Exam Progress</h3>
+            <p className={`text-sm mt-1 ${isDarkMode ? 'text-slate-200' : 'text-gray-600'}`}>
+              Includes exams with today&apos;s date or later. Exams without a date stay active.
+            </p>
+          </div>
+          {activeExams.length === 0 ? (
+            <p className={isDarkMode ? 'text-slate-200' : 'text-gray-600'}>
+              No active exams right now. Add a future exam date to track progress here.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {activeExams.map(exam => {
+                const examProgress = calculateProgress(exam.materials || []);
+                const examCounts = getTaskCounts(exam.materials || []);
+                const examTotal = examCounts.complete + examCounts.inProgress + examCounts.notStarted;
+                return (
+                  <div
+                    key={exam.id}
+                    className={`rounded-lg border p-4 ${isDarkMode ? 'border-[#456974] bg-[#18262b]' : 'border-gray-200 bg-gray-50'}`}
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className={`font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>{exam.name}</p>
+                        <p className={`text-sm ${isDarkMode ? 'text-slate-200' : 'text-gray-600'}`}>
+                          {exam.date ? `Exam date ${formatDate(exam.date)}` : 'No exam date set'} · {exam.materials?.length || 0} materials · {examCounts.complete}/{examTotal} tasks complete
+                        </p>
+                      </div>
+                      <p className={`text-2xl font-bold ${isDarkMode ? 'text-green-100' : 'text-green-700'}`}>{examProgress}%</p>
+                    </div>
+                    <div className={`mt-3 w-full rounded-full h-2 ${isDarkMode ? 'bg-green-900/60' : 'bg-green-200'}`}>
+                      <div
+                        className={`h-2 rounded-full ${isDarkMode ? 'bg-green-400' : 'bg-green-600'}`}
+                        style={{ width: `${examProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Task Status */}
@@ -1449,8 +1560,8 @@ const PassTracker = () => {
             <div className="flex items-center space-x-3 p-4 bg-yellow-50 rounded-lg">
               <Clock className="text-yellow-600" size={24} />
               <div>
-                <p className="text-yellow-700 font-semibold">{counts.inProgress}</p>
-                <p className="text-yellow-600 text-sm">In Progress</p>
+                <p className={`font-semibold ${isDarkMode ? 'text-amber-200' : 'text-yellow-700'}`}>{counts.inProgress}</p>
+                <p className={`text-sm ${isDarkMode ? 'text-amber-200' : 'text-yellow-600'}`}>In Progress</p>
               </div>
             </div>
             <div className="flex items-center space-x-3 p-4 bg-gray-50 rounded-lg">
@@ -1671,47 +1782,73 @@ const PassTracker = () => {
   };
 
   const TodoPage = () => {
-    const sections = buildTodoItems();
+    const sections = buildTodoItems(todoExamIds);
+    const selectedTodoExams = exams.filter(exam => todoExamIds.includes(exam.id));
+    const selectionLabel = selectedTodoExams.length === 0
+      ? 'No exams selected'
+      : selectedTodoExams.length === exams.length
+        ? 'All exams'
+        : selectedTodoExams.length === 1
+          ? selectedTodoExams[0].name
+          : `${selectedTodoExams.length} exams selected`;
+
+    const toggleTodoExam = (examId) => {
+      setTodoExamIds(prev => (
+        prev.includes(examId)
+          ? prev.filter(id => id !== examId)
+          : [...prev, examId]
+      ));
+    };
+
     const sectionConfig = [
       {
         key: 'today',
         title: 'Due Today',
         emptyMessage: 'No tasks are due today.',
-        accent: 'border-blue-200 bg-blue-50',
+        accent: isDarkMode
+          ? 'border-[#3d6f86] bg-[#173046]'
+          : 'border-blue-200 bg-blue-50',
       },
       {
         key: 'overdue',
         title: 'Overdue',
         emptyMessage: 'Nothing is overdue right now.',
-        accent: 'border-red-200 bg-red-50',
+        accent: isDarkMode
+          ? 'border-[#8a4d4d] bg-[#3a1f24]'
+          : 'border-red-200 bg-red-50',
       },
       {
         key: 'upcoming',
         title: 'Upcoming',
         emptyMessage: 'No tasks are coming up in the next two days.',
-        accent: 'border-yellow-200 bg-yellow-50',
+        accent: isDarkMode
+          ? 'border-[#8a7340] bg-[#3a321c]'
+          : 'border-yellow-200 bg-yellow-50',
       },
     ];
 
     const TodoSection = ({ title, items, emptyMessage, accent }) => (
       <div className={`rounded-lg border p-6 ${accent}`}>
-        <h2 className="text-2xl font-bold mb-4">{title}</h2>
+        <h2 className={`text-2xl font-bold mb-4 ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>{title}</h2>
         {items.length === 0 ? (
-          <p className="text-gray-600">{emptyMessage}</p>
+          <p className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>{emptyMessage}</p>
         ) : (
           <div className="space-y-3">
             {items.map(item => (
-              <div key={`${item.examId}-${item.materialId}-${item.taskType}-${item.dueDate}`} className="bg-white rounded-lg border border-gray-200 p-4">
+              <div
+                key={`${item.examId}-${item.materialId}-${item.taskType}-${item.dueDate}`}
+                className={`rounded-lg border p-4 ${isDarkMode ? 'bg-[#1c343b] border-[#5c8a9a]' : 'bg-white border-gray-200'}`}
+              >
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-gray-900">{item.materialName}</p>
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                      <p className={`font-semibold ${isDarkMode ? 'text-gray-50' : 'text-gray-900'}`}>{item.materialName}</p>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${isDarkMode ? 'bg-[#304a53] text-slate-100' : 'bg-gray-100 text-gray-700'}`}>
                         {item.taskType}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-600">
-                      <span className="font-medium text-gray-700">{item.examName}</span> · Due {formatDate(item.dueDate)}
+                    <p className={`text-sm ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
+                      <span className={`font-medium ${isDarkMode ? 'text-slate-100' : 'text-gray-800'}`}>{item.examName}</span> · Due {formatDate(item.dueDate)}
                     </p>
                   </div>
                   <button
@@ -1732,7 +1869,88 @@ const PassTracker = () => {
       <div className="space-y-6">
         <div className="bg-gradient-to-r from-slate-700 to-slate-900 text-white p-8 rounded-lg">
           <h1 className="text-4xl font-bold">To Do List</h1>
-          <p className="text-slate-200 mt-2">Tasks grouped by due date across all exams.</p>
+          <p className="text-slate-200 mt-2">
+            Tasks grouped by due date for the exams you select.
+          </p>
+        </div>
+
+        <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-[#18262b] border-[#456974]' : 'bg-white border-gray-200'}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className={`text-sm font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Exams in To Do</p>
+              <p className={`text-sm ${isDarkMode ? 'text-slate-200' : 'text-gray-600'}`}>
+                Choose which exams contribute tasks to this list.
+              </p>
+            </div>
+            <div className="relative" ref={todoExamMenuRef}>
+              <button
+                type="button"
+                onClick={() => setTodoExamMenuOpen(open => !open)}
+                className={`inline-flex min-w-[220px] items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  isDarkMode
+                    ? 'border-[#5c8a9a] bg-[#21343a] text-gray-100 hover:bg-[#304a53]'
+                    : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-50'
+                }`}
+              >
+                <span className="truncate">{selectionLabel}</span>
+                <ChevronDown size={16} className={todoExamMenuOpen ? 'rotate-180 transition' : 'transition'} />
+              </button>
+              {todoExamMenuOpen && (
+                <div
+                  className={`absolute right-0 z-20 mt-2 w-72 rounded-lg border p-2 shadow-lg ${
+                    isDarkMode
+                      ? 'border-[#5c8a9a] bg-[#18262b]'
+                      : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <div className={`mb-2 flex items-center justify-between gap-2 px-2 pb-2 border-b ${isDarkMode ? 'border-[#456974]' : 'border-gray-200'}`}>
+                    <button
+                      type="button"
+                      onClick={() => setTodoExamIds(exams.map(exam => exam.id))}
+                      className={`text-xs font-medium ${isDarkMode ? 'text-blue-300 hover:text-blue-200' : 'text-blue-700 hover:text-blue-800'}`}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTodoExamIds([])}
+                      className={`text-xs font-medium ${isDarkMode ? 'text-slate-300 hover:text-slate-100' : 'text-gray-600 hover:text-gray-800'}`}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="max-h-64 space-y-1 overflow-y-auto">
+                    {exams.map(exam => {
+                      const checked = todoExamIds.includes(exam.id);
+                      return (
+                        <label
+                          key={exam.id}
+                          className={`flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm ${
+                            isDarkMode
+                              ? 'text-gray-100 hover:bg-[#21343a]'
+                              : 'text-gray-800 hover:bg-gray-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleTodoExam(exam.id)}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="truncate">{exam.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          {todoExamIds.length === 0 && (
+            <p className={`mt-3 text-sm ${isDarkMode ? 'text-amber-200' : 'text-amber-800'}`}>
+              Select at least one exam to show tasks in the lists below.
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-6">

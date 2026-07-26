@@ -190,3 +190,35 @@
 [data-theme="dark"] .text-indigo-600 {
   color: #88CCF1 !important;
 }
+
+[data-theme="dark"] .bg-red-50 {
+  background-color: #3a1f24 !important;
+}
+
+[data-theme="dark"] .bg-yellow-50 {
+  background-color: #3a321c !important;
+}
+
+[data-theme="dark"] .border-red-200 {
+  border-color: #8a4d4d !important;
+}
+
+[data-theme="dark"] .border-yellow-200 {
+  border-color: #8a7340 !important;
+}
+
+[data-theme="dark"] .text-slate-200 {
+  color: #e2eef5 !important;
+}
+
+[data-theme="dark"] .text-slate-100 {
+  color: #f3f8fb !important;
+}
+
+[data-theme="dark"] .text-amber-200 {
+  color: #f6e2a8 !important;
+}
+
+[data-theme="dark"] .text-amber-800 {
+  color: #f6e2a8 !important;
+}
