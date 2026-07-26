@@ -88,10 +88,169 @@ const normalizeExamsData = (examList, templates) =>
     }))),
   })));
 
+const EMPTY_RESOURCES = { disorders: [], medications: [] };
+const DEFAULT_EXAMS = [{ id: 1, name: 'Exam 1', date: '', materials: [] }];
+
+const mergeById = (localItems = [], remoteItems = [], getId, mergeMatched) => {
+  const remoteMap = new Map();
+  remoteItems.forEach(item => {
+    const id = getId(item);
+    if (id != null) remoteMap.set(String(id), item);
+  });
+
+  const merged = [];
+  const seen = new Set();
+
+  localItems.forEach(localItem => {
+    const id = getId(localItem);
+    const key = id == null ? null : String(id);
+    if (key != null) seen.add(key);
+    const remoteItem = key != null ? remoteMap.get(key) : undefined;
+    merged.push(remoteItem && mergeMatched ? mergeMatched(localItem, remoteItem) : localItem);
+  });
+
+  remoteItems.forEach(remoteItem => {
+    const id = getId(remoteItem);
+    const key = id == null ? null : String(id);
+    if (key != null && seen.has(key)) return;
+    if (key != null) seen.add(key);
+    merged.push(remoteItem);
+  });
+
+  return merged;
+};
+
+const mergeMaterials = (localMaterials = [], remoteMaterials = []) =>
+  mergeById(localMaterials, remoteMaterials, material => material.id, (localMaterial) => localMaterial);
+
+const mergeExams = (localExams = [], remoteExams = []) =>
+  mergeById(localExams, remoteExams, exam => exam.id, (localExam, remoteExam) => ({
+    ...localExam,
+    materials: mergeMaterials(localExam.materials || [], remoteExam.materials || []),
+  }));
+
+const mergeTaskTemplatesList = (localTemplates = [], remoteTemplates = []) => {
+  const merged = cloneTaskTemplates(localTemplates);
+  const seen = new Set(merged.map(template => template.label));
+
+  remoteTemplates.forEach(template => {
+    const label = template?.label;
+    if (!label || seen.has(label)) return;
+    seen.add(label);
+    merged.push({
+      label,
+      offsetDays: Number(template.offsetDays) || 0,
+    });
+  });
+
+  return merged.length > 0 ? merged : cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
+};
+
+const mergeResourcesData = (localResources = EMPTY_RESOURCES, remoteResources = EMPTY_RESOURCES) => ({
+  disorders: mergeById(localResources.disorders || [], remoteResources.disorders || [], item => item.id, (localItem) => localItem),
+  medications: mergeById(localResources.medications || [], remoteResources.medications || [], item => item.id, (localItem) => localItem),
+});
+
+const mergeCloudPayloads = (localPayload, remotePayload) => {
+  const taskTemplates = mergeTaskTemplatesList(
+    localPayload.taskTemplates || [],
+    remotePayload.taskTemplates || [],
+  );
+
+  return {
+    exams: normalizeExamsData(
+      mergeExams(localPayload.exams || [], remotePayload.exams || []),
+      taskTemplates,
+    ),
+    taskTemplates,
+    resources: mergeResourcesData(localPayload.resources, remotePayload.resources),
+    theme: localPayload.theme === 'light' || localPayload.theme === 'dark'
+      ? localPayload.theme
+      : remotePayload.theme === 'light' || remotePayload.theme === 'dark'
+        ? remotePayload.theme
+        : 'light',
+  };
+};
+
+const stableSerialize = (value) => JSON.stringify(value);
+
+const findOverlappingDiffs = (localItems = [], remoteItems = [], getId, describe) => {
+  const remoteMap = new Map();
+  remoteItems.forEach(item => {
+    const id = getId(item);
+    if (id != null) remoteMap.set(String(id), item);
+  });
+
+  const conflicts = [];
+  localItems.forEach(localItem => {
+    const id = getId(localItem);
+    if (id == null) return;
+    const remoteItem = remoteMap.get(String(id));
+    if (!remoteItem) return;
+    if (stableSerialize(localItem) !== stableSerialize(remoteItem)) {
+      conflicts.push(describe(localItem, remoteItem));
+    }
+  });
+  return conflicts;
+};
+
+const collectSyncConflicts = (localPayload, remotePayload) => {
+  const conflicts = [];
+
+  (localPayload.exams || []).forEach(localExam => {
+    const remoteExam = (remotePayload.exams || []).find(exam => String(exam.id) === String(localExam.id));
+    if (!remoteExam) return;
+
+    const localShell = { id: localExam.id, name: localExam.name, date: localExam.date };
+    const remoteShell = { id: remoteExam.id, name: remoteExam.name, date: remoteExam.date };
+    if (stableSerialize(localShell) !== stableSerialize(remoteShell)) {
+      conflicts.push(`Exam "${localExam.name || 'Exam'}"`);
+    }
+
+    findOverlappingDiffs(
+      localExam.materials || [],
+      remoteExam.materials || [],
+      material => material.id,
+      (localMaterial) => `Lecture "${localMaterial.name || 'Untitled'}" in exam "${localExam.name || 'Exam'}"`,
+    ).forEach(item => conflicts.push(item));
+  });
+
+  findOverlappingDiffs(
+    localPayload.taskTemplates || [],
+    remotePayload.taskTemplates || [],
+    template => template.label,
+    (localTemplate) => `Task setup "${localTemplate.label}"`,
+  ).forEach(item => conflicts.push(item));
+
+  findOverlappingDiffs(
+    localPayload.resources?.disorders || [],
+    remotePayload.resources?.disorders || [],
+    item => item.id,
+    (localItem) => `Disorder "${localItem.name || localItem.Name || 'Untitled'}"`,
+  ).forEach(item => conflicts.push(item));
+
+  findOverlappingDiffs(
+    localPayload.resources?.medications || [],
+    remotePayload.resources?.medications || [],
+    item => item.id,
+    (localItem) => `Medication "${localItem.drug || localItem.Drug || localItem.name || 'Untitled'}"`,
+  ).forEach(item => conflicts.push(item));
+
+  if (
+    (localPayload.theme === 'light' || localPayload.theme === 'dark')
+    && (remotePayload.theme === 'light' || remotePayload.theme === 'dark')
+    && localPayload.theme !== remotePayload.theme
+  ) {
+    conflicts.push(`Theme (local: ${localPayload.theme}, cloud: ${remotePayload.theme})`);
+  }
+
+  return conflicts;
+};
+
 const loadExams = (templates) => {
   const saved = localStorage.getItem('passTrackerExams');
   if (!saved) {
-    return [{ id: 1, name: 'Exam 1', date: '', materials: [] }];
+    return normalizeExamsData(DEFAULT_EXAMS, templates);
   }
 
   try {
@@ -104,7 +263,7 @@ const loadExams = (templates) => {
       materials: exam.materials || [],
     })), templates);
   } catch {
-    return [{ id: 1, name: 'Exam 1', date: '', materials: [] }];
+    return normalizeExamsData(DEFAULT_EXAMS, templates);
   }
 };
 
@@ -152,6 +311,7 @@ const CloudSyncPanel = ({
   onPasswordSignUp,
   onSignOut,
   onRefresh,
+  onConfirmMerge,
   onKeepCloudVersion,
   onKeepLocalVersion,
 }) => {
@@ -172,6 +332,7 @@ const CloudSyncPanel = ({
           </div>
           <p className="mt-2 text-sm text-gray-600">
             Sign in once and your exams, lectures, resources, and theme will stay synced between devices.
+            New local items are added to the cloud list, and when the same item exists in both places the local copy is kept.
           </p>
           {!isSupabaseConfigured && (
             <p className="mt-2 text-sm text-amber-700">
@@ -333,15 +494,37 @@ const CloudSyncPanel = ({
       )}
       {cloudConflict && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-900">Conflict detected</p>
+          <p className="text-sm font-semibold text-amber-900">Confirm sync changes</p>
           <p className="mt-1 text-sm text-amber-800">
-            {cloudConflict.message || 'Your local changes and the cloud copy both changed since the last sync.'}
+            {cloudConflict.message || 'Local and cloud data overlap on some items. Confirm before these changes become permanent.'}
           </p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          {Array.isArray(cloudConflict.conflicts) && cloudConflict.conflicts.length > 0 && (
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-amber-900">
+              {cloudConflict.conflicts.slice(0, 8).map(item => (
+                <li key={item}>{item}</li>
+              ))}
+              {cloudConflict.conflicts.length > 8 && (
+                <li>...and {cloudConflict.conflicts.length - 8} more</li>
+              )}
+            </ul>
+          )}
+          <p className="mt-3 text-xs text-amber-800">
+            Confirm merge keeps local copies for conflicts and also adds non-overlapping items from both sides.
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <button
+              type="button"
+              onClick={onConfirmMerge}
+              disabled={cloudBusy}
+              className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Confirm merge
+            </button>
             <button
               type="button"
               onClick={onKeepCloudVersion}
-              className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-700"
+              disabled={cloudBusy}
+              className="inline-flex items-center justify-center rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Use cloud version
             </button>
@@ -351,7 +534,7 @@ const CloudSyncPanel = ({
               disabled={cloudBusy}
               className="inline-flex items-center justify-center rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Keep local version
+              Keep local only
             </button>
           </div>
         </div>
@@ -384,12 +567,10 @@ const PassTracker = () => {
   const [cloudSyncedAt, setCloudSyncedAt] = useState(null);
   const [cloudConflict, setCloudConflict] = useState(null);
   const lastSyncedPayloadRef = useRef('');
+  const cloudHydratedRef = useRef(false);
   const [resources, setResources] = useState(() => {
     const saved = localStorage.getItem('passTrackerResources');
-    return saved ? JSON.parse(saved) : {
-      disorders: [],
-      medications: []
-    };
+    return saved ? JSON.parse(saved) : { ...EMPTY_RESOURCES };
   });
 
   // Save to localStorage whenever data changes
@@ -413,15 +594,6 @@ const PassTracker = () => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('passTrackerTheme', theme);
   }, [theme]);
-
-  useEffect(() => {
-    lastSyncedPayloadRef.current = JSON.stringify({
-      exams,
-      taskTemplates,
-      resources,
-      theme,
-    });
-  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
@@ -458,13 +630,18 @@ const PassTracker = () => {
   }, []);
 
   useEffect(() => {
-    if (!cloudUser || !supabase) return undefined;
+    if (!cloudUser || !supabase) {
+      cloudHydratedRef.current = false;
+      return undefined;
+    }
 
     fetchCloudState(cloudUser.id);
   }, [cloudUser]);
 
   useEffect(() => {
-    if (!cloudUser || !supabase || cloudLoading || cloudBusy || cloudConflict) return undefined;
+    if (!cloudUser || !supabase || !cloudHydratedRef.current || cloudLoading || cloudBusy || cloudConflict) {
+      return undefined;
+    }
 
     const currentPayload = buildCurrentCloudPayload();
     const currentSerialized = serializeCloudPayload(currentPayload);
@@ -558,14 +735,40 @@ const PassTracker = () => {
     }
   };
 
+  const clearLocalStudyData = () => {
+    const nextTemplates = cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
+    const nextExams = normalizeExamsData(DEFAULT_EXAMS, nextTemplates);
+    const nextResources = { ...EMPTY_RESOURCES };
+
+    setTaskTemplates(nextTemplates);
+    setExams(nextExams);
+    setResources(nextResources);
+    setSelectedExam(nextExams[0]?.id ?? null);
+    setExpandedMaterials({});
+    setCloudSyncedAt(null);
+    setCloudConflict(null);
+    lastSyncedPayloadRef.current = '';
+    cloudHydratedRef.current = false;
+
+    localStorage.setItem('passTrackerExams', JSON.stringify(nextExams));
+    localStorage.setItem('passTrackerTaskTemplates', JSON.stringify(nextTemplates));
+    localStorage.setItem('passTrackerResources', JSON.stringify(nextResources));
+  };
+
   const handleCloudSignOut = async () => {
     if (!supabase) return;
     setCloudBusy(true);
     setCloudError('');
     const { error } = await supabase.auth.signOut();
-    if (error) setCloudError(error.message);
+    if (error) {
+      setCloudError(error.message);
+      setCloudBusy(false);
+      return;
+    }
+
+    clearLocalStudyData();
     setCloudBusy(false);
-    setCloudNotice('Signed out.');
+    setCloudNotice('Signed out. Local study data was cleared on this device.');
   };
 
   const serializeCloudPayload = (payload) => JSON.stringify({
@@ -585,19 +788,22 @@ const PassTracker = () => {
   const normalizeCloudPayload = (cloudState) => {
     const nextTaskTemplates = Array.isArray(cloudState.taskTemplates) && cloudState.taskTemplates.length
       ? cloneTaskTemplates(cloudState.taskTemplates)
-      : taskTemplates;
+      : cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
 
     return {
       exams: Array.isArray(cloudState.exams)
         ? normalizeExamsData(cloudState.exams, nextTaskTemplates)
-        : exams,
+        : normalizeExamsData(DEFAULT_EXAMS, nextTaskTemplates),
       taskTemplates: nextTaskTemplates,
       resources: cloudState.resources && typeof cloudState.resources === 'object'
-        ? cloudState.resources
-        : resources,
+        ? {
+            disorders: Array.isArray(cloudState.resources.disorders) ? cloudState.resources.disorders : [],
+            medications: Array.isArray(cloudState.resources.medications) ? cloudState.resources.medications : [],
+          }
+        : { ...EMPTY_RESOURCES },
       theme: cloudState.theme === 'light' || cloudState.theme === 'dark'
         ? cloudState.theme
-        : theme,
+        : 'light',
     };
   };
 
@@ -606,6 +812,11 @@ const PassTracker = () => {
     setExams(payload.exams);
     setResources(payload.resources);
     setTheme(payload.theme);
+    if (payload.exams?.[0]?.id != null) {
+      setSelectedExam(prev => (
+        payload.exams.some(exam => exam.id === prev) ? prev : payload.exams[0].id
+      ));
+    }
     lastSyncedPayloadRef.current = serializeCloudPayload(payload);
     setCloudSyncedAt(syncedAt);
     setCloudConflict(null);
@@ -646,6 +857,7 @@ const PassTracker = () => {
 
     setCloudBusy(true);
     setCloudError('');
+    cloudHydratedRef.current = false;
 
     const { data, error } = await supabase
       .from('user_app_state')
@@ -659,32 +871,65 @@ const PassTracker = () => {
       return;
     }
 
+    const localPayload = buildCurrentCloudPayload();
     const cloudState = data?.state;
-    if (cloudState && typeof cloudState === 'object') {
-      const normalizedRemote = normalizeCloudPayload(cloudState);
-      const currentSerialized = serializeCloudPayload(buildCurrentCloudPayload());
-      const remoteSerialized = serializeCloudPayload(normalizedRemote);
-      const baselineSerialized = lastSyncedPayloadRef.current;
-      const localDirty = currentSerialized !== baselineSerialized;
-      const remoteDirty = remoteSerialized !== baselineSerialized;
 
-      if (localDirty && remoteDirty) {
-        setCloudConflict({
-          payload: normalizedRemote,
-          updatedAt: data?.updated_at ?? new Date().toISOString(),
-          message: 'Both this device and the cloud changed since the last sync.',
-        });
-        setCloudNotice('Conflict detected. Choose which version to keep.');
+    if (cloudState && typeof cloudState === 'object') {
+      const remotePayload = normalizeCloudPayload(cloudState);
+      const localSerialized = serializeCloudPayload(localPayload);
+      const remoteSerialized = serializeCloudPayload(remotePayload);
+
+      if (localSerialized === remoteSerialized) {
+        applyCloudPayload(remotePayload, data?.updated_at ?? new Date().toISOString());
+        setCloudNotice('Cloud data loaded.');
+        cloudHydratedRef.current = true;
         setCloudBusy(false);
         return;
       }
 
-      applyCloudPayload(normalizedRemote, data?.updated_at ?? new Date().toISOString());
-      setCloudNotice('Cloud data loaded.');
+      const mergedPayload = mergeCloudPayloads(localPayload, remotePayload);
+      const conflicts = collectSyncConflicts(localPayload, remotePayload);
+
+      if (conflicts.length > 0) {
+        setCloudConflict({
+          mergedPayload,
+          remotePayload,
+          localPayload,
+          conflicts,
+          updatedAt: data?.updated_at ?? new Date().toISOString(),
+          message: 'Some items exist in both places with different content. Review and confirm before saving.',
+        });
+        setCloudNotice('Sync paused. Confirm how to resolve overlapping changes.');
+        setCloudBusy(false);
+        return;
+      }
+
+      applyCloudPayload(mergedPayload, data?.updated_at ?? new Date().toISOString());
+      const mergedSerialized = serializeCloudPayload(mergedPayload);
+      if (mergedSerialized !== remoteSerialized) {
+        const saved = await persistCloudPayload(
+          mergedPayload,
+          'Merged non-conflicting local and cloud items.',
+        );
+        if (!saved) {
+          cloudHydratedRef.current = true;
+          return;
+        }
+      } else {
+        setCloudNotice('Cloud data loaded.');
+      }
     } else {
-      setCloudNotice('Signed in. Your local changes will sync to the cloud.');
+      const saved = await persistCloudPayload(
+        localPayload,
+        'Signed in. Your local data was saved to the cloud.',
+      );
+      if (!saved) {
+        cloudHydratedRef.current = true;
+        return;
+      }
     }
 
+    cloudHydratedRef.current = true;
     setCloudBusy(false);
   };
 
@@ -693,15 +938,28 @@ const PassTracker = () => {
     await fetchCloudState(cloudUser.id);
   };
 
-  const handleKeepCloudVersion = () => {
-    if (!cloudConflict) return;
-    applyCloudPayload(cloudConflict.payload, cloudConflict.updatedAt ?? new Date().toISOString());
-    setCloudNotice('Loaded the cloud version.');
+  const handleConfirmMerge = async () => {
+    if (!cloudConflict?.mergedPayload) return;
+    applyCloudPayload(cloudConflict.mergedPayload, cloudConflict.updatedAt ?? new Date().toISOString());
+    const saved = await persistCloudPayload(
+      cloudConflict.mergedPayload,
+      'Merge confirmed. Local copies were kept for conflicts and unique items from both sides were kept.',
+    );
+    if (saved) cloudHydratedRef.current = true;
+  };
+
+  const handleKeepCloudVersion = async () => {
+    if (!cloudConflict?.remotePayload) return;
+    applyCloudPayload(cloudConflict.remotePayload, cloudConflict.updatedAt ?? new Date().toISOString());
+    const saved = await persistCloudPayload(cloudConflict.remotePayload, 'Loaded the cloud version.');
+    if (saved) cloudHydratedRef.current = true;
   };
 
   const handleKeepLocalVersion = async () => {
-    if (!cloudConflict) return;
-    await persistCloudPayload(buildCurrentCloudPayload(), 'Kept the local version and updated the cloud copy.');
+    if (!cloudConflict?.localPayload) return;
+    applyCloudPayload(cloudConflict.localPayload, new Date().toISOString());
+    const saved = await persistCloudPayload(cloudConflict.localPayload, 'Kept the local version and updated the cloud copy.');
+    if (saved) cloudHydratedRef.current = true;
   };
 
   const ThemeToggle = ({ className = '' } = {}) => (
@@ -1903,6 +2161,7 @@ const PassTracker = () => {
           onPasswordSignUp={handleCloudPasswordSignUp}
           onSignOut={handleCloudSignOut}
           onRefresh={handleCloudRefresh}
+          onConfirmMerge={handleConfirmMerge}
           onKeepCloudVersion={handleKeepCloudVersion}
           onKeepLocalVersion={handleKeepLocalVersion}
         />
