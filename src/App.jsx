@@ -1,5 +1,5 @@
 import React, { Fragment, useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 
 const DEFAULT_TASK_TEMPLATES = [
@@ -148,7 +148,8 @@ const CloudSyncPanel = ({
   cloudNotice,
   cloudSyncedAt,
   cloudConflict,
-  onSignIn,
+  onPasswordSignIn,
+  onPasswordSignUp,
   onSignOut,
   onRefresh,
   onKeepCloudVersion,
@@ -156,6 +157,10 @@ const CloudSyncPanel = ({
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
+  const [authMode, setAuthMode] = useState('signin');
+  const [pendingAction, setPendingAction] = useState(null);
+  const signedInLabel = cloudUser?.user_metadata?.username || cloudUser?.email || 'your account';
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -181,7 +186,7 @@ const CloudSyncPanel = ({
           {cloudUser ? (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                Signed in as <span className="font-semibold">{cloudUser.email}</span>
+                Signed in as <span className="font-semibold">{signedInLabel}</span>
               </div>
               <button
                 type="button"
@@ -204,6 +209,42 @@ const CloudSyncPanel = ({
             </div>
           ) : (
             <div className="max-w-md space-y-3">
+              <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-sm font-medium">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('signin');
+                    setPendingAction(null);
+                  }}
+                  className={`rounded-md px-3 py-1.5 transition ${authMode === 'signin' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('signup');
+                    setPendingAction(null);
+                  }}
+                  className={`rounded-md px-3 py-1.5 transition ${authMode === 'signup' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
+                >
+                  Create account
+                </button>
+              </div>
+
+              {authMode === 'signup' && (
+                <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
+                  <User className="text-gray-400" size={16} />
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Username"
+                    className="w-full bg-transparent outline-none"
+                  />
+                </div>
+              )}
+
               <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
                 <Mail className="text-gray-400" size={16} />
                 <input
@@ -227,25 +268,38 @@ const CloudSyncPanel = ({
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  onClick={() => onPasswordSignIn(email, password)}
+                  onClick={async () => {
+                    setPendingAction('signin');
+                    await onPasswordSignIn(email, password);
+                    setPendingAction(null);
+                  }}
                   disabled={cloudBusy || !email.trim() || !password || !isSupabaseConfigured}
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
-                  Sign in
+                  {cloudBusy || pendingAction === 'signin' ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                  {pendingAction === 'signin' ? 'Signing in...' : 'Sign in'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => onPasswordSignUp(email, password)}
-                  disabled={cloudBusy || !email.trim() || !password || !isSupabaseConfigured}
+                  onClick={async () => {
+                    setPendingAction('signup');
+                    await onPasswordSignUp(email, password, username);
+                    setPendingAction(null);
+                  }}
+                  disabled={cloudBusy || !email.trim() || !password || !username.trim() || !isSupabaseConfigured}
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-4 py-3 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {cloudBusy ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
-                  Create account
+                  {cloudBusy || pendingAction === 'signup' ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
+                  {pendingAction === 'signup' ? 'Creating...' : 'Create account'}
                 </button>
               </div>
+              {pendingAction && (
+                <p className="text-sm text-gray-600">
+                  {pendingAction === 'signin' ? 'Checking your email and password...' : 'Creating your account and saving your username...'}
+                </p>
+              )}
               <p className="text-xs text-gray-500">
-                Use the same email and password each time. If email confirmation is enabled in Supabase, you may still need to verify once by email.
+                Use the same email and password each time. New accounts also store the username in your profile.
               </p>
             </div>
           )}
@@ -256,7 +310,13 @@ const CloudSyncPanel = ({
         <p className="mt-4 text-sm text-gray-500">Checking cloud session...</p>
       )}
       {cloudBusy && !cloudLoading && (
-        <p className="mt-4 text-sm text-gray-500">Syncing data...</p>
+        <p className="mt-4 text-sm text-gray-500">
+          {pendingAction === 'signin'
+            ? 'Signing in...'
+            : pendingAction === 'signup'
+              ? 'Creating account...'
+              : 'Syncing data...'}
+        </p>
       )}
       {cloudConflict && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -431,45 +491,58 @@ const PassTracker = () => {
     setCloudBusy(true);
     setCloudError('');
     setCloudNotice('');
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+      if (error) {
+        setCloudError(error.message);
+        return;
+      }
 
-    if (error) {
-      setCloudError(error.message);
+      setCloudNotice('Signed in successfully.');
+    } catch (err) {
+      setCloudError(err instanceof Error ? err.message : 'Unable to sign in.');
+    } finally {
       setCloudBusy(false);
-      return;
     }
-
-    setCloudNotice('Signed in successfully.');
-    setCloudBusy(false);
   };
 
-  const handleCloudPasswordSignUp = async (email, password) => {
-    if (!supabase || !email?.trim() || !password) return;
+  const handleCloudPasswordSignUp = async (email, password, username) => {
+    if (!supabase || !email?.trim() || !password || !username?.trim()) return;
 
     setCloudBusy(true);
     setCloudError('');
     setCloudNotice('');
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          emailRedirectTo: window.location.origin,
+          data: {
+            username: username.trim(),
+          },
+        },
+      });
 
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo: window.location.origin,
-      },
-    });
+      if (error) {
+        setCloudError(error.message);
+        return;
+      }
 
-    if (error) {
-      setCloudError(error.message);
+      if (data?.session) {
+        setCloudNotice(`Account created and signed in as ${username.trim()}.`);
+      } else {
+        setCloudNotice(`Account created for ${username.trim()}. Check your email if confirmation is enabled, then sign in.`);
+      }
+    } catch (err) {
+      setCloudError(err instanceof Error ? err.message : 'Unable to create account.');
+    } finally {
       setCloudBusy(false);
-      return;
     }
-
-    setCloudNotice('Account created. Check your email if confirmation is enabled, or sign in now.');
-    setCloudBusy(false);
   };
 
   const handleCloudSignOut = async () => {
