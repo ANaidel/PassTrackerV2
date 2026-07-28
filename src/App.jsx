@@ -1550,6 +1550,10 @@ const PassTracker = () => {
     updateTask(examId, materialId, taskType, 'Complete');
   };
 
+  const markTaskInProgress = (examId, materialId, taskType) => {
+    updateTask(examId, materialId, taskType, 'In Progress');
+  };
+
   const addTaskTemplate = (label, offsetDays) => {
     const nextLabel = getUniqueTaskLabel(label, new Set(taskTemplates.map(template => template.label)));
     const nextTemplate = {
@@ -2310,17 +2314,55 @@ const PassTracker = () => {
 
     const sortedMaterials = sortByDateAsc(exam.materials);
 
+    const expandAllMaterials = () => {
+      setExpandedMaterials(prev => {
+        const next = { ...prev };
+        sortedMaterials.forEach(material => {
+          next[`${exam.id}-${material.id}`] = true;
+        });
+        return next;
+      });
+    };
+
+    const collapseAllMaterials = () => {
+      setExpandedMaterials(prev => {
+        const next = { ...prev };
+        sortedMaterials.forEach(material => {
+          next[`${exam.id}-${material.id}`] = false;
+        });
+        return next;
+      });
+    };
+
     return (
       <div className="space-y-3 bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
-        <div className="flex justify-between items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
           <h2 className="text-2xl font-bold">{exam.name} Materials</h2>
-          <button
-            onClick={() => addMaterial(exam.id)}
-            className="inline-flex items-center space-x-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition text-sm shrink-0"
-          >
-            <Plus size={16} />
-            <span>Add Lecture</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={expandAllMaterials}
+              disabled={sortedMaterials.length === 0}
+              className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Expand all
+            </button>
+            <button
+              type="button"
+              onClick={collapseAllMaterials}
+              disabled={sortedMaterials.length === 0}
+              className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Collapse all
+            </button>
+            <button
+              onClick={() => addMaterial(exam.id)}
+              className="inline-flex items-center space-x-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition text-sm shrink-0"
+            >
+              <Plus size={16} />
+              <span>Add Lecture</span>
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-gray-200">
@@ -2558,12 +2600,31 @@ const PassTracker = () => {
                       <span className={`font-medium ${isDarkMode ? 'text-slate-100' : 'text-gray-800'}`}>{item.examName}</span> · Due {formatDate(item.dueDate)}
                     </p>
                   </div>
-                  <button
-                    onClick={() => completeTask(item.examId, item.materialId, item.taskType)}
-                    className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition"
-                  >
-                    Mark Complete
-                  </button>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => markTaskInProgress(item.examId, item.materialId, item.taskType)}
+                      disabled={item.status === 'In Progress'}
+                      className={`inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${
+                        item.status === 'In Progress'
+                          ? isDarkMode
+                            ? 'border border-[rgba(201,162,78,0.45)] bg-[rgba(201,162,78,0.2)] text-[#F6E7B2]'
+                            : 'border border-yellow-300 bg-yellow-50 text-yellow-800'
+                          : isDarkMode
+                            ? 'border border-[rgba(232,217,188,0.28)] bg-transparent text-[#F6F2E8] hover:bg-[#1b3349]'
+                            : 'border border-gray-300 bg-white text-gray-800 hover:bg-gray-50'
+                      }`}
+                    >
+                      {item.status === 'In Progress' ? 'In Progress' : 'Mark In Progress'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => completeTask(item.examId, item.materialId, item.taskType)}
+                      className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition"
+                    >
+                      Mark Complete
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
