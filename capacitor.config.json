@@ -1,0 +1,21 @@
+{
+  "appId": "com.passtracker.app",
+  "appName": "PassTracker",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "https"
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "preferredContentMode": "mobile",
+    "scheme": "PassTracker"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#164E6B",
+      "showSpinner": false
+    }
+  }
+}

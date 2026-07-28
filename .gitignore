@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+dev-dist/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Capacitor / Xcode
+ios/App/Pods/
+ios/App/App/public/
+ios/DerivedData/
+*.xcuserdata/
+*.xcworkspace/xcuserdata/

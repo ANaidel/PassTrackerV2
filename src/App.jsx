@@ -462,8 +462,12 @@ const CloudSyncPanel = ({
   cloudNotice,
   cloudSyncedAt,
   cloudConflict,
+  passwordRecoveryMode,
   onPasswordSignIn,
   onPasswordSignUp,
+  onPasswordResetRequest,
+  onPasswordUpdate,
+  onCancelPasswordRecovery,
   onSignOut,
   onRefresh,
   onConfirmMerge,
@@ -472,10 +476,12 @@ const CloudSyncPanel = ({
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
   const [authMode, setAuthMode] = useState('signin');
   const [pendingAction, setPendingAction] = useState(null);
   const signedInLabel = cloudUser?.user_metadata?.username || cloudUser?.email || 'your account';
+  const passwordsMatch = password && confirmPassword && password === confirmPassword;
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -499,7 +505,61 @@ const CloudSyncPanel = ({
         </div>
 
         <div className="flex flex-col gap-3">
-          {cloudUser ? (
+          {passwordRecoveryMode ? (
+            <div className="max-w-md space-y-3">
+              <p className="text-sm font-medium text-gray-800">Set a new password</p>
+              <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
+                <Lock className="text-gray-400" size={16} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="New password"
+                  className="w-full bg-transparent outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
+                <Lock className="text-gray-400" size={16} />
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm new password"
+                  className="w-full bg-transparent outline-none"
+                />
+              </div>
+              {confirmPassword && !passwordsMatch && (
+                <p className="text-sm text-red-600">Passwords do not match.</p>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  setPendingAction('updatePassword');
+                  await onPasswordUpdate(password);
+                  setPendingAction(null);
+                  setPassword('');
+                  setConfirmPassword('');
+                }}
+                disabled={cloudBusy || !passwordsMatch || password.length < 6 || !isSupabaseConfigured}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloudBusy || pendingAction === 'updatePassword' ? <Loader2 className="animate-spin" size={16} /> : <Lock size={16} />}
+                {pendingAction === 'updatePassword' ? 'Saving password...' : 'Save new password'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingAction(null);
+                  setPassword('');
+                  setConfirmPassword('');
+                  onCancelPasswordRecovery();
+                }}
+                className="text-xs font-medium text-blue-700 hover:text-blue-800"
+              >
+                Cancel recovery
+              </button>
+            </div>
+          ) : cloudUser ? (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
                 Signed in as <span className="font-semibold">{signedInLabel}</span>
@@ -525,28 +585,36 @@ const CloudSyncPanel = ({
             </div>
           ) : (
             <div className="max-w-md space-y-3">
-              <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-sm font-medium">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('signin');
-                    setPendingAction(null);
-                  }}
-                  className={`rounded-md px-3 py-1.5 transition ${authMode === 'signin' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
-                >
-                  Sign in
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('signup');
-                    setPendingAction(null);
-                  }}
-                  className={`rounded-md px-3 py-1.5 transition ${authMode === 'signup' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
-                >
-                  Create account
-                </button>
-              </div>
+              {authMode !== 'reset' && (
+                <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-sm font-medium">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('signin');
+                      setPendingAction(null);
+                    }}
+                    className={`rounded-md px-3 py-1.5 transition ${authMode === 'signin' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('signup');
+                      setPendingAction(null);
+                    }}
+                    className={`rounded-md px-3 py-1.5 transition ${authMode === 'signup' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
+                  >
+                    Create account
+                  </button>
+                </div>
+              )}
+
+              {authMode === 'reset' && (
+                <p className="text-sm text-gray-700">
+                  Enter the email for your account and we will send a password reset link.
+                </p>
+              )}
 
               {authMode === 'signup' && (
                 <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
@@ -571,18 +639,20 @@ const CloudSyncPanel = ({
                   className="w-full bg-transparent outline-none"
                 />
               </div>
-              <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
-                <Lock className="text-gray-400" size={16} />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                  className="w-full bg-transparent outline-none"
-                />
-              </div>
+              {authMode !== 'reset' && (
+                <div className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-3">
+                  <Lock className="text-gray-400" size={16} />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password"
+                    className="w-full bg-transparent outline-none"
+                  />
+                </div>
+              )}
               <div className="flex flex-col gap-2 sm:flex-row">
-                {authMode === 'signin' ? (
+                {authMode === 'signin' && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -596,7 +666,8 @@ const CloudSyncPanel = ({
                     {cloudBusy || pendingAction === 'signin' ? <Loader2 className="animate-spin" size={16} /> : <Cloud size={16} />}
                     {pendingAction === 'signin' ? 'Signing in...' : 'Sign in'}
                   </button>
-                ) : (
+                )}
+                {authMode === 'signup' && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -611,24 +682,67 @@ const CloudSyncPanel = ({
                     {pendingAction === 'signup' ? 'Creating...' : 'Create account'}
                   </button>
                 )}
+                {authMode === 'reset' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setPendingAction('reset');
+                      await onPasswordResetRequest(email);
+                      setPendingAction(null);
+                    }}
+                    disabled={cloudBusy || !email.trim() || !isSupabaseConfigured}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cloudBusy || pendingAction === 'reset' ? <Loader2 className="animate-spin" size={16} /> : <Mail size={16} />}
+                    {pendingAction === 'reset' ? 'Sending reset link...' : 'Send reset link'}
+                  </button>
+                )}
               </div>
               {pendingAction && (
                 <p className="text-sm text-gray-600">
-                  {pendingAction === 'signin' ? 'Checking your email and password...' : 'Creating your account and saving your username...'}
+                  {pendingAction === 'signin'
+                    ? 'Checking your email and password...'
+                    : pendingAction === 'signup'
+                      ? 'Creating your account and saving your username...'
+                      : pendingAction === 'reset'
+                        ? 'Sending password reset email...'
+                        : 'Working...'}
                 </p>
               )}
               <p className="text-xs text-gray-500">
-                Use the same email and password each time. New accounts also store the username in your profile.
+                {authMode === 'reset'
+                  ? 'Check your inbox for a reset link. After opening it, you can choose a new password here.'
+                  : 'Use the same email and password each time. New accounts also store the username in your profile.'}
               </p>
+              {authMode === 'signin' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('reset');
+                    setPendingAction(null);
+                    setPassword('');
+                  }}
+                  className="text-xs font-medium text-blue-700 hover:text-blue-800"
+                >
+                  Forgot password?
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
-                  setAuthMode(current => (current === 'signin' ? 'signup' : 'signin'));
+                  setAuthMode(current => {
+                    if (current === 'reset') return 'signin';
+                    return current === 'signin' ? 'signup' : 'signin';
+                  });
                   setPendingAction(null);
                 }}
                 className="text-xs font-medium text-blue-700 hover:text-blue-800"
               >
-                {authMode === 'signin' ? 'Need an account? Create one' : 'Already have an account? Sign in'}
+                {authMode === 'signin'
+                  ? 'Need an account? Create one'
+                  : authMode === 'signup'
+                    ? 'Already have an account? Sign in'
+                    : 'Back to sign in'}
               </button>
             </div>
           )}
@@ -644,7 +758,11 @@ const CloudSyncPanel = ({
             ? 'Signing in...'
             : pendingAction === 'signup'
               ? 'Creating account...'
-              : 'Syncing data...'}
+              : pendingAction === 'reset'
+                ? 'Sending reset email...'
+                : pendingAction === 'updatePassword'
+                  ? 'Saving new password...'
+                  : 'Syncing data...'}
         </p>
       )}
       {cloudConflict && (
@@ -736,6 +854,7 @@ const PassTracker = () => {
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState('');
   const [cloudNotice, setCloudNotice] = useState('');
+  const [passwordRecoveryMode, setPasswordRecoveryMode] = useState(false);
   const [cloudSyncedAt, setCloudSyncedAt] = useState(null);
   const [cloudConflict, setCloudConflict] = useState(null);
   const lastSyncedPayloadRef = useRef('');
@@ -790,7 +909,15 @@ const PassTracker = () => {
 
     syncSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecoveryMode(true);
+        setCloudNotice('Enter a new password to finish recovering your account.');
+        setCloudError('');
+      }
+      if (event === 'SIGNED_OUT') {
+        setPasswordRecoveryMode(false);
+      }
       setCloudUser(session?.user ?? null);
       setCloudLoading(false);
     });
@@ -933,6 +1060,71 @@ const PassTracker = () => {
       setCloudError(err instanceof Error ? err.message : 'Unable to create account.');
     } finally {
       setCloudBusy(false);
+    }
+  };
+
+  const handleCloudPasswordResetRequest = async (email) => {
+    if (!supabase || !email?.trim()) return;
+
+    setCloudBusy(true);
+    setCloudError('');
+    setCloudNotice('');
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/?type=recovery`,
+      });
+
+      if (error) {
+        setCloudError(error.message);
+        return;
+      }
+
+      setCloudNotice('Password reset email sent. Open the link from your inbox to choose a new password.');
+    } catch (err) {
+      setCloudError(err instanceof Error ? err.message : 'Unable to send reset email.');
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCloudPasswordUpdate = async (password) => {
+    if (!supabase || !password || password.length < 6) {
+      setCloudError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setCloudBusy(true);
+    setCloudError('');
+    setCloudNotice('');
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+
+      if (error) {
+        setCloudError(error.message);
+        return;
+      }
+
+      setPasswordRecoveryMode(false);
+      setCloudNotice('Password updated. You are signed in with your new password.');
+
+      if (window.location.search.includes('type=recovery')) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('type');
+        window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+      }
+    } catch (err) {
+      setCloudError(err instanceof Error ? err.message : 'Unable to update password.');
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCancelPasswordRecovery = async () => {
+    setPasswordRecoveryMode(false);
+    setCloudNotice('');
+    setCloudError('');
+    if (supabase) {
+      await supabase.auth.signOut();
     }
   };
 
@@ -2520,8 +2712,12 @@ const PassTracker = () => {
           cloudNotice={cloudNotice}
           cloudSyncedAt={cloudSyncedAt}
           cloudConflict={cloudConflict}
+          passwordRecoveryMode={passwordRecoveryMode}
           onPasswordSignIn={handleCloudPasswordSignIn}
           onPasswordSignUp={handleCloudPasswordSignUp}
+          onPasswordResetRequest={handleCloudPasswordResetRequest}
+          onPasswordUpdate={handleCloudPasswordUpdate}
+          onCancelPasswordRecovery={handleCancelPasswordRecovery}
           onSignOut={handleCloudSignOut}
           onRefresh={handleCloudRefresh}
           onConfirmMerge={handleConfirmMerge}
