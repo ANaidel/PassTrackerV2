@@ -492,8 +492,83 @@ const CloudSyncPanel = ({
   const [username, setUsername] = useState('');
   const [authMode, setAuthMode] = useState('signin');
   const [pendingAction, setPendingAction] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const previousUserRef = useRef(cloudUser);
   const signedInLabel = cloudUser?.user_metadata?.username || cloudUser?.email || 'your account';
   const passwordsMatch = password && confirmPassword && password === confirmPassword;
+  const needsAttention = Boolean(
+    passwordRecoveryMode
+    || cloudConflict
+    || (!cloudUser && !cloudLoading),
+  );
+  const isExpanded = needsAttention || expanded;
+
+  useEffect(() => {
+    const wasSignedIn = Boolean(previousUserRef.current);
+    const isSignedIn = Boolean(cloudUser);
+
+    if (isSignedIn && !wasSignedIn) {
+      setExpanded(false);
+    }
+    if (!isSignedIn && wasSignedIn) {
+      setExpanded(true);
+    }
+
+    previousUserRef.current = cloudUser;
+  }, [cloudUser]);
+
+  useEffect(() => {
+    if (cloudConflict || passwordRecoveryMode) {
+      setExpanded(true);
+    }
+  }, [cloudConflict, passwordRecoveryMode]);
+
+  if (cloudLoading && !cloudUser && !passwordRecoveryMode) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+        <div className="flex items-center gap-3 text-sm text-gray-600">
+          <Loader2 className="animate-spin text-blue-600" size={16} />
+          Checking cloud session...
+        </div>
+      </div>
+    );
+  }
+
+  if (cloudUser && !isExpanded) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white">
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-gray-50"
+          aria-expanded="false"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <Cloud className="shrink-0 text-blue-600" size={18} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-gray-900">
+                Cloud Sync · Signed in as {signedInLabel}
+              </p>
+              <p className="truncate text-xs text-gray-500">
+                {cloudBusy
+                  ? 'Syncing...'
+                  : cloudSyncedAt
+                    ? `Last synced ${new Date(cloudSyncedAt).toLocaleString()}`
+                    : 'Tap to manage sync'}
+              </p>
+            </div>
+          </div>
+          <ChevronDown size={18} className="shrink-0 text-gray-500" />
+        </button>
+        {(cloudNotice || cloudError) && (
+          <div className="border-t border-gray-100 px-4 py-2">
+            {cloudNotice && <p className="text-xs text-green-700">{cloudNotice}</p>}
+            {cloudError && <p className="text-xs text-red-600">{cloudError}</p>}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -502,6 +577,17 @@ const CloudSyncPanel = ({
           <div className="flex items-center gap-2">
             <Cloud className="text-blue-600" size={20} />
             <h2 className="text-xl font-bold">Cloud Sync</h2>
+            {cloudUser && !needsAttention && (
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                className="ml-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-100"
+                aria-expanded="true"
+              >
+                Collapse
+                <ChevronDown size={14} className="rotate-180" />
+              </button>
+            )}
           </div>
           <p className="mt-2 text-sm text-gray-600">
             Sign in once and your exams, lectures, resources, and theme will stay synced between devices.
