@@ -172,7 +172,93 @@ const mergeCloudPayloads = (localPayload, remotePayload) => {
   };
 };
 
-const stableSerialize = (value) => JSON.stringify(value);
+const stableSerialize = (value) => {
+  const normalize = (input) => {
+    if (Array.isArray(input)) return input.map(normalize);
+    if (input && typeof input === 'object') {
+      return Object.keys(input)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = normalize(input[key]);
+          return acc;
+        }, {});
+    }
+    return input;
+  };
+
+  return JSON.stringify(normalize(value));
+};
+
+const serializeCloudPayload = (payload) => stableSerialize({
+  exams: payload.exams,
+  taskTemplates: payload.taskTemplates,
+  resources: payload.resources,
+  theme: payload.theme,
+});
+
+const normalizeCloudPayload = (cloudState = {}) => {
+  const nextTaskTemplates = Array.isArray(cloudState.taskTemplates) && cloudState.taskTemplates.length
+    ? cloneTaskTemplates(cloudState.taskTemplates)
+    : cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
+
+  return {
+    exams: Array.isArray(cloudState.exams)
+      ? normalizeExamsData(cloudState.exams, nextTaskTemplates)
+      : normalizeExamsData(DEFAULT_EXAMS, nextTaskTemplates),
+    taskTemplates: nextTaskTemplates,
+    resources: cloudState.resources && typeof cloudState.resources === 'object'
+      ? {
+          disorders: Array.isArray(cloudState.resources.disorders) ? cloudState.resources.disorders : [],
+          medications: Array.isArray(cloudState.resources.medications) ? cloudState.resources.medications : [],
+        }
+      : { ...EMPTY_RESOURCES },
+    theme: cloudState.theme === 'light' || cloudState.theme === 'dark'
+      ? cloudState.theme
+      : 'light',
+  };
+};
+
+const LAST_SYNCED_STORAGE_PREFIX = 'passTrackerLastSynced:';
+
+const readLastSyncedPayload = (userId) => {
+  if (!userId) return '';
+  try {
+    return localStorage.getItem(`${LAST_SYNCED_STORAGE_PREFIX}${userId}`) || '';
+  } catch {
+    return '';
+  }
+};
+
+const writeLastSyncedPayload = (userId, serialized) => {
+  if (!userId || !serialized) return;
+  try {
+    localStorage.setItem(`${LAST_SYNCED_STORAGE_PREFIX}${userId}`, serialized);
+  } catch {
+    // Ignore quota / private-mode failures; in-memory baseline still works for this session.
+  }
+};
+
+const clearLastSyncedPayload = (userId) => {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(`${LAST_SYNCED_STORAGE_PREFIX}${userId}`);
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
+const isPristineStudyPayload = (payload) => {
+  const normalized = normalizeCloudPayload(payload);
+  const defaultTemplates = cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
+  const defaultExams = normalizeExamsData(DEFAULT_EXAMS, defaultTemplates);
+  const emptyResources = { ...EMPTY_RESOURCES };
+
+  return (
+    stableSerialize(normalized.exams) === stableSerialize(defaultExams)
+    && stableSerialize(normalized.taskTemplates) === stableSerialize(defaultTemplates)
+    && stableSerialize(normalized.resources) === stableSerialize(emptyResources)
+  );
+};
 
 const findOverlappingDiffs = (localItems = [], remoteItems = [], getId, describe) => {
   const remoteMap = new Map();
@@ -245,6 +331,75 @@ const collectSyncConflicts = (localPayload, remotePayload) => {
   }
 
   return conflicts;
+};
+
+/**
+ * Decide how to reconcile local and cloud payloads.
+ * Only returns `conflict` when both sides have real diverging edits.
+ */
+const resolveCloudSyncDecision = (localPayload, remotePayload, baselineSerialized = '') => {
+  const localSerialized = serializeCloudPayload(localPayload);
+  const remoteSerialized = serializeCloudPayload(remotePayload);
+  const hasBaseline = Boolean(baselineSerialized);
+  const localChanged = hasBaseline && localSerialized !== baselineSerialized;
+  const remoteChanged = hasBaseline && remoteSerialized !== baselineSerialized;
+  const localPristine = isPristineStudyPayload(localPayload);
+  const remotePristine = isPristineStudyPayload(remotePayload);
+
+  if (localSerialized === remoteSerialized) {
+    return { action: 'use-remote', notice: 'Cloud data loaded.' };
+  }
+
+  if (localPristine) {
+    return { action: 'use-remote', notice: 'Cloud data loaded.' };
+  }
+
+  if (remotePristine) {
+    return {
+      action: 'use-local',
+      notice: 'Signed in. Your local data was saved to the cloud.',
+    };
+  }
+
+  if (hasBaseline) {
+    if (!localChanged) {
+      return {
+        action: 'use-remote',
+        notice: 'Cloud data loaded. Local copy was unchanged.',
+      };
+    }
+
+    if (!remoteChanged) {
+      return {
+        action: 'use-local',
+        notice: 'Local changes were saved to the cloud.',
+      };
+    }
+  }
+
+  const mergedPayload = mergeCloudPayloads(localPayload, remotePayload);
+  const conflicts = collectSyncConflicts(localPayload, remotePayload);
+
+  if (conflicts.length > 0) {
+    return {
+      action: 'conflict',
+      mergedPayload,
+      conflicts,
+      message: hasBaseline
+        ? 'Both this device and the cloud changed since the last sync. Review and confirm before saving.'
+        : 'Local and cloud both have study data that overlaps. Review and confirm before saving.',
+    };
+  }
+
+  const mergedSerialized = serializeCloudPayload(mergedPayload);
+  return {
+    action: 'use-merged',
+    mergedPayload,
+    notice: mergedSerialized !== remoteSerialized
+      ? 'Merged non-conflicting local and cloud items.'
+      : 'Cloud data loaded.',
+    shouldPersist: mergedSerialized !== remoteSerialized,
+  };
 };
 
 const loadExams = (templates) => {
@@ -332,7 +487,7 @@ const CloudSyncPanel = ({
           </div>
           <p className="mt-2 text-sm text-gray-600">
             Sign in once and your exams, lectures, resources, and theme will stay synced between devices.
-            New local items are added to the cloud list, and when the same item exists in both places the local copy is kept.
+            Unique items from either side are kept automatically. You are only asked to confirm when the same item changed in both places.
           </p>
           {!isSupabaseConfigured && (
             <p className="mt-2 text-sm text-amber-700">
@@ -781,7 +936,14 @@ const PassTracker = () => {
     }
   };
 
-  const clearLocalStudyData = () => {
+  const rememberSyncedPayload = (userId, payload) => {
+    const serialized = serializeCloudPayload(payload);
+    lastSyncedPayloadRef.current = serialized;
+    writeLastSyncedPayload(userId, serialized);
+    return serialized;
+  };
+
+  const clearLocalStudyData = (userId = cloudUser?.id) => {
     const nextTemplates = cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
     const nextExams = normalizeExamsData(DEFAULT_EXAMS, nextTemplates);
     const nextResources = { ...EMPTY_RESOURCES };
@@ -798,6 +960,7 @@ const PassTracker = () => {
     setCloudConflict(null);
     lastSyncedPayloadRef.current = '';
     cloudHydratedRef.current = false;
+    clearLastSyncedPayload(userId);
 
     localStorage.setItem('passTrackerExams', JSON.stringify(nextExams));
     localStorage.setItem('passTrackerTaskTemplates', JSON.stringify(nextTemplates));
@@ -807,6 +970,7 @@ const PassTracker = () => {
 
   const handleCloudSignOut = async () => {
     if (!supabase) return;
+    const signedOutUserId = cloudUser?.id;
     setCloudBusy(true);
     setCloudError('');
     const { error } = await supabase.auth.signOut();
@@ -816,58 +980,30 @@ const PassTracker = () => {
       return;
     }
 
-    clearLocalStudyData();
+    clearLocalStudyData(signedOutUserId);
     setCloudBusy(false);
     setCloudNotice('Signed out. Local study data was cleared on this device.');
   };
 
-  const serializeCloudPayload = (payload) => JSON.stringify({
-    exams: payload.exams,
-    taskTemplates: payload.taskTemplates,
-    resources: payload.resources,
-    theme: payload.theme,
-  });
-
-  const buildCurrentCloudPayload = () => ({
+  const buildCurrentCloudPayload = () => normalizeCloudPayload({
     exams,
     taskTemplates,
     resources,
     theme,
   });
 
-  const normalizeCloudPayload = (cloudState) => {
-    const nextTaskTemplates = Array.isArray(cloudState.taskTemplates) && cloudState.taskTemplates.length
-      ? cloneTaskTemplates(cloudState.taskTemplates)
-      : cloneTaskTemplates(DEFAULT_TASK_TEMPLATES);
-
-    return {
-      exams: Array.isArray(cloudState.exams)
-        ? normalizeExamsData(cloudState.exams, nextTaskTemplates)
-        : normalizeExamsData(DEFAULT_EXAMS, nextTaskTemplates),
-      taskTemplates: nextTaskTemplates,
-      resources: cloudState.resources && typeof cloudState.resources === 'object'
-        ? {
-            disorders: Array.isArray(cloudState.resources.disorders) ? cloudState.resources.disorders : [],
-            medications: Array.isArray(cloudState.resources.medications) ? cloudState.resources.medications : [],
-          }
-        : { ...EMPTY_RESOURCES },
-      theme: cloudState.theme === 'light' || cloudState.theme === 'dark'
-        ? cloudState.theme
-        : 'light',
-    };
-  };
-
-  const applyCloudPayload = (payload, syncedAt) => {
-    setTaskTemplates(payload.taskTemplates);
-    setExams(payload.exams);
-    setResources(payload.resources);
-    setTheme(payload.theme);
-    if (payload.exams?.[0]?.id != null) {
+  const applyCloudPayload = (payload, syncedAt, userId = cloudUser?.id) => {
+    const normalizedPayload = normalizeCloudPayload(payload);
+    setTaskTemplates(normalizedPayload.taskTemplates);
+    setExams(normalizedPayload.exams);
+    setResources(normalizedPayload.resources);
+    setTheme(normalizedPayload.theme);
+    if (normalizedPayload.exams?.[0]?.id != null) {
       setSelectedExam(prev => (
-        payload.exams.some(exam => exam.id === prev) ? prev : payload.exams[0].id
+        normalizedPayload.exams.some(exam => exam.id === prev) ? prev : normalizedPayload.exams[0].id
       ));
     }
-    lastSyncedPayloadRef.current = serializeCloudPayload(payload);
+    rememberSyncedPayload(userId, normalizedPayload);
     setCloudSyncedAt(syncedAt);
     setCloudConflict(null);
   };
@@ -878,9 +1014,11 @@ const PassTracker = () => {
     setCloudBusy(true);
     setCloudError('');
 
+    const normalizedPayload = normalizeCloudPayload(payload);
+
     const { data: savedRow, error } = await supabase.from('user_app_state').upsert({
       user_id: cloudUser.id,
-      state: payload,
+      state: normalizedPayload,
       updated_at: new Date().toISOString(),
     }).select('updated_at').single();
 
@@ -890,7 +1028,7 @@ const PassTracker = () => {
       return false;
     }
 
-    lastSyncedPayloadRef.current = serializeCloudPayload(payload);
+    rememberSyncedPayload(cloudUser.id, normalizedPayload);
     setCloudSyncedAt(savedRow?.updated_at ?? new Date().toISOString());
     setCloudConflict(null);
 
@@ -909,6 +1047,10 @@ const PassTracker = () => {
     setCloudError('');
     cloudHydratedRef.current = false;
 
+    if (!lastSyncedPayloadRef.current) {
+      lastSyncedPayloadRef.current = readLastSyncedPayload(userId);
+    }
+
     const { data, error } = await supabase
       .from('user_app_state')
       .select('state, updated_at')
@@ -923,50 +1065,53 @@ const PassTracker = () => {
 
     const localPayload = buildCurrentCloudPayload();
     const cloudState = data?.state;
+    const syncedAt = data?.updated_at ?? new Date().toISOString();
+    const baselineSerialized = lastSyncedPayloadRef.current;
 
     if (cloudState && typeof cloudState === 'object') {
       const remotePayload = normalizeCloudPayload(cloudState);
-      const localSerialized = serializeCloudPayload(localPayload);
-      const remoteSerialized = serializeCloudPayload(remotePayload);
+      const decision = resolveCloudSyncDecision(localPayload, remotePayload, baselineSerialized);
 
-      if (localSerialized === remoteSerialized) {
-        applyCloudPayload(remotePayload, data?.updated_at ?? new Date().toISOString());
-        setCloudNotice('Cloud data loaded.');
-        cloudHydratedRef.current = true;
-        setCloudBusy(false);
-        return;
-      }
-
-      const mergedPayload = mergeCloudPayloads(localPayload, remotePayload);
-      const conflicts = collectSyncConflicts(localPayload, remotePayload);
-
-      if (conflicts.length > 0) {
+      if (decision.action === 'conflict') {
         setCloudConflict({
-          mergedPayload,
+          mergedPayload: decision.mergedPayload,
           remotePayload,
           localPayload,
-          conflicts,
-          updatedAt: data?.updated_at ?? new Date().toISOString(),
-          message: 'Some items exist in both places with different content. Review and confirm before saving.',
+          conflicts: decision.conflicts,
+          updatedAt: syncedAt,
+          message: decision.message,
         });
         setCloudNotice('Sync paused. Confirm how to resolve overlapping changes.');
         setCloudBusy(false);
         return;
       }
 
-      applyCloudPayload(mergedPayload, data?.updated_at ?? new Date().toISOString());
-      const mergedSerialized = serializeCloudPayload(mergedPayload);
-      if (mergedSerialized !== remoteSerialized) {
-        const saved = await persistCloudPayload(
-          mergedPayload,
-          'Merged non-conflicting local and cloud items.',
-        );
+      if (decision.action === 'use-remote') {
+        applyCloudPayload(remotePayload, syncedAt, userId);
+        setCloudNotice(decision.notice);
+        cloudHydratedRef.current = true;
+        setCloudBusy(false);
+        return;
+      }
+
+      if (decision.action === 'use-local') {
+        applyCloudPayload(localPayload, syncedAt, userId);
+        const saved = await persistCloudPayload(localPayload, decision.notice);
+        cloudHydratedRef.current = true;
+        if (!saved) setCloudBusy(false);
+        return;
+      }
+
+      // use-merged
+      applyCloudPayload(decision.mergedPayload, syncedAt, userId);
+      if (decision.shouldPersist) {
+        const saved = await persistCloudPayload(decision.mergedPayload, decision.notice);
         if (!saved) {
           cloudHydratedRef.current = true;
           return;
         }
       } else {
-        setCloudNotice('Cloud data loaded.');
+        setCloudNotice(decision.notice);
       }
     } else {
       const saved = await persistCloudPayload(
