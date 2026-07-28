@@ -1,6 +1,18 @@
 import React, { Fragment, useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User, ChevronDown, Bell } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
+import {
+  loadReminderSettings,
+  saveReminderSettings,
+  getNotificationPermission,
+  requestNotificationPermission,
+  syncDailyReminderSchedule,
+  maybeSendDailyDigest,
+  clearDailyReminderSchedule,
+  showImmediateReminder,
+  reminderPlatformLabel,
+  buildReminderCopy,
+} from './lib/taskReminders';
 
 const DEFAULT_TASK_TEMPLATES = [
   { label: 'Preview', offsetDays: -1 },
@@ -848,6 +860,10 @@ const PassTracker = () => {
   const [todoExamMenuOpen, setTodoExamMenuOpen] = useState(false);
   const todoExamMenuRef = useRef(null);
   const knownTodoExamIdsRef = useRef(new Set(initialExams.map(exam => exam.id)));
+  const [reminderSettings, setReminderSettings] = useState(() => loadReminderSettings());
+  const [reminderPermission, setReminderPermission] = useState('prompt');
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const [reminderNotice, setReminderNotice] = useState('');
   const [expandedMaterials, setExpandedMaterials] = useState({});
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudLoading, setCloudLoading] = useState(isSupabaseConfigured);
@@ -1644,6 +1660,274 @@ const PassTracker = () => {
     };
   };
 
+  useEffect(() => {
+    let handle;
+
+    const attachNativeListener = async () => {
+      try {
+        const { Capacitor } = await import('@capacitor/core');
+        if (!Capacitor.isNativePlatform()) return;
+        const { LocalNotifications } = await import('@capacitor/local-notifications');
+        handle = await LocalNotifications.addListener('localNotificationActionPerformed', () => {
+          setActiveTab('todo');
+          setMobileMenuOpen(false);
+        });
+      } catch {
+        // Native notifications are optional in web builds.
+      }
+    };
+
+    attachNativeListener();
+
+    return () => {
+      handle?.remove?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getNotificationPermission().then((status) => {
+      if (!cancelled) setReminderPermission(status);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timerId;
+
+    const runReminders = async () => {
+      const sections = buildTodoItems(todoExamIds);
+      const overdueCount = sections.overdue.length;
+      const todayCount = sections.today.length;
+
+      const scheduleResult = await syncDailyReminderSchedule({
+        settings: reminderSettings,
+        overdueCount,
+        todayCount,
+      });
+      if (cancelled) return;
+
+      if (scheduleResult.permission) {
+        setReminderPermission(scheduleResult.permission);
+      }
+
+      await maybeSendDailyDigest({
+        settings: reminderSettings,
+        overdueCount,
+        todayCount,
+      });
+      if (cancelled) return;
+
+      if (reminderSettings.enabled && scheduleResult.webTimerMs != null) {
+        timerId = window.setTimeout(async () => {
+          const latest = buildTodoItems(todoExamIds);
+          await maybeSendDailyDigest({
+            settings: reminderSettings,
+            overdueCount: latest.overdue.length,
+            todayCount: latest.today.length,
+            force: true,
+          });
+        }, scheduleResult.webTimerMs);
+      }
+    };
+
+    runReminders();
+
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      const sections = buildTodoItems(todoExamIds);
+      maybeSendDailyDigest({
+        settings: reminderSettings,
+        overdueCount: sections.overdue.length,
+        todayCount: sections.today.length,
+      });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      cancelled = true;
+      if (timerId) window.clearTimeout(timerId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [reminderSettings, exams, todoExamIds, taskTemplates]);
+
+  const updateReminderSettings = async (patch) => {
+    setReminderBusy(true);
+    setReminderNotice('');
+
+    const candidate = {
+      ...reminderSettings,
+      ...patch,
+    };
+
+    if (!candidate.includeDueToday && !candidate.includeOverdue) {
+      setReminderNotice('Choose at least one of Due today or Overdue.');
+      setReminderBusy(false);
+      return;
+    }
+
+    let next = saveReminderSettings(candidate);
+
+    if (next.enabled) {
+      const permission = await requestNotificationPermission();
+      setReminderPermission(permission);
+
+      if (permission !== 'granted') {
+        next = saveReminderSettings({ ...next, enabled: false });
+        setReminderSettings(next);
+        await clearDailyReminderSchedule();
+        setReminderNotice(
+          permission === 'denied'
+            ? 'Notifications are blocked. Enable them in your browser or device settings, then try again.'
+            : 'Notification permission is required to send reminders.',
+        );
+        setReminderBusy(false);
+        return;
+      }
+    } else {
+      await clearDailyReminderSchedule();
+    }
+
+    setReminderSettings(next);
+    setReminderNotice(
+      next.enabled
+        ? `Daily reminders enabled for ${next.time}.`
+        : 'Daily reminders turned off.',
+    );
+    setReminderBusy(false);
+  };
+
+  const sendTestReminder = async () => {
+    setReminderBusy(true);
+    setReminderNotice('');
+
+    const permission = await requestNotificationPermission();
+    setReminderPermission(permission);
+    if (permission !== 'granted') {
+      setReminderNotice(
+        permission === 'denied'
+          ? 'Notifications are blocked for this app.'
+          : 'Allow notifications to send a test reminder.',
+      );
+      setReminderBusy(false);
+      return;
+    }
+
+    const sections = buildTodoItems(todoExamIds);
+    const copy = buildReminderCopy({
+      overdueCount: sections.overdue.length,
+      todayCount: sections.today.length,
+      includeOverdue: reminderSettings.includeOverdue,
+      includeDueToday: reminderSettings.includeDueToday,
+    });
+
+    const result = await showImmediateReminder({
+      title: copy.title,
+      body: copy.shouldNotify
+        ? copy.body
+        : 'Test reminder — no overdue or due-today tasks right now.',
+    });
+
+    setReminderNotice(result.sent ? 'Test reminder sent.' : 'Could not send a test reminder.');
+    setReminderBusy(false);
+  };
+
+  const TaskRemindersPanel = () => (
+    <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-[#223F5A] border-[rgba(232,217,188,0.22)]' : 'bg-white border-gray-200'}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Bell size={18} className={isDarkMode ? 'text-[#74C9D7]' : 'text-blue-700'} />
+            <p className={`text-sm font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+              Daily reminders
+            </p>
+          </div>
+          <p className={`text-sm ${isDarkMode ? 'text-slate-200' : 'text-gray-600'}`}>
+            Get a local notification for overdue tasks and tasks due today.
+          </p>
+          <p className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-gray-500'}`}>
+            {reminderPlatformLabel()}
+          </p>
+        </div>
+        <label className={`inline-flex items-center gap-2 text-sm font-medium ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
+          <input
+            type="checkbox"
+            checked={reminderSettings.enabled}
+            disabled={reminderBusy}
+            onChange={(event) => updateReminderSettings({ enabled: event.target.checked })}
+            className="rounded border-gray-300"
+          />
+          Enable
+        </label>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className={`text-sm ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
+          Reminder time
+          <input
+            type="time"
+            value={reminderSettings.time}
+            disabled={reminderBusy}
+            onChange={(event) => updateReminderSettings({ time: event.target.value || '08:00' })}
+            className={`mt-1 w-full rounded-lg border px-3 py-2 ${
+              isDarkMode
+                ? 'border-[rgba(232,217,188,0.28)] bg-[#164E6B] text-[#F6F2E8]'
+                : 'border-gray-300 bg-white text-gray-900'
+            }`}
+          />
+        </label>
+        <div className={`space-y-2 text-sm ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
+          <p className="font-medium">Include</p>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={reminderSettings.includeDueToday}
+              disabled={reminderBusy}
+              onChange={(event) => updateReminderSettings({ includeDueToday: event.target.checked })}
+              className="rounded border-gray-300"
+            />
+            Due today
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={reminderSettings.includeOverdue}
+              disabled={reminderBusy}
+              onChange={(event) => updateReminderSettings({ includeOverdue: event.target.checked })}
+              className="rounded border-gray-300"
+            />
+            Overdue
+          </label>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-gray-500'}`}>
+          Permission: {reminderPermission}
+        </p>
+        <button
+          type="button"
+          onClick={sendTestReminder}
+          disabled={reminderBusy}
+          className="inline-flex items-center justify-center rounded-lg border border-blue-300 px-3 py-2 text-sm font-medium text-blue-800 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Send test reminder
+        </button>
+      </div>
+      {reminderNotice && (
+        <p className={`mt-3 text-sm ${isDarkMode ? 'text-slate-100' : 'text-gray-700'}`}>
+          {reminderNotice}
+        </p>
+      )}
+    </div>
+  );
+
   const TaskSetupPanel = () => {
     const [newTaskLabel, setNewTaskLabel] = useState('');
     const [newTaskOffset, setNewTaskOffset] = useState(0);
@@ -2289,6 +2573,8 @@ const PassTracker = () => {
             </p>
           )}
         </div>
+
+        <TaskRemindersPanel />
 
         <div className="grid grid-cols-1 gap-6">
           {sectionConfig.map(section => (

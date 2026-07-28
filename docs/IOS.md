@@ -44,4 +44,12 @@ Then run on a simulator or device from Xcode.
 
 Password recovery still uses your HTTPS production URL (Vercel). Keep those URLs in Supabase Auth redirect allow lists. The iOS app loads the bundled web build from `dist` via Capacitor; cloud auth/API calls go to Supabase over HTTPS.
 
+## Local task reminders
+
+Daily overdue / due-today reminders use `@capacitor/local-notifications`.
+
+1. After pulling reminder changes, run `npm run build:ios` so the plugin is synced.
+2. On first enable in the To Do tab, iOS will prompt for notification permission.
+3. Scheduled daily reminders can fire while the app is closed; browser/PWA reminders mainly fire while PassTracker is open.
+
 See also [`docs/APP_STORE.md`](APP_STORE.md) for App Store Connect submission steps.
