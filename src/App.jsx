@@ -1469,7 +1469,7 @@ const PassTracker = () => {
 
         {/* Progress Overview */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#173b3c] border-[#2a5060]' : 'bg-gradient-to-br from-green-50 to-green-100 border-green-200'}`}>
+          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#1b3349] border-[rgba(46,142,143,0.4)]' : 'bg-gradient-to-br from-green-50 to-green-100 border-green-200'}`}>
             <div className="flex items-center justify-between mb-4">
               <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Overall Progress</h3>
               <TrendingUp className={isDarkMode ? 'text-green-300' : 'text-green-600'} size={24} />
@@ -1483,7 +1483,7 @@ const PassTracker = () => {
             </p>
           </div>
 
-          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#173046] border-[#2a5060]' : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200'}`}>
+          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#1b3349] border-[rgba(116,201,215,0.28)]' : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200'}`}>
             <div className="flex items-center justify-between mb-4">
               <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Completed Tasks</h3>
               <CheckCircle className={isDarkMode ? 'text-blue-300' : 'text-blue-600'} size={24} />
@@ -1492,7 +1492,7 @@ const PassTracker = () => {
             <p className={isDarkMode ? 'text-blue-200 text-sm mt-2' : 'text-blue-600 text-sm mt-2'}>of {totalTasks} total</p>
           </div>
 
-          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#1b3142] border-[#2a5060]' : 'bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200'}`}>
+          <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-[#1b3349] border-[rgba(201,162,78,0.35)]' : 'bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200'}`}>
             <div className="flex items-center justify-between mb-4">
               <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Materials</h3>
               <BookOpen className={isDarkMode ? 'text-purple-300' : 'text-purple-600'} size={24} />
@@ -1522,7 +1522,7 @@ const PassTracker = () => {
                 return (
                   <div
                     key={exam.id}
-                    className={`rounded-lg border p-4 ${isDarkMode ? 'border-[#456974] bg-[#18262b]' : 'border-gray-200 bg-gray-50'}`}
+                    className={`rounded-lg border p-4 ${isDarkMode ? 'border-[rgba(232,217,188,0.22)] bg-[#223F5A]' : 'border-gray-200 bg-gray-50'}`}
                   >
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
@@ -1806,7 +1806,7 @@ const PassTracker = () => {
         title: 'Due Today',
         emptyMessage: 'No tasks are due today.',
         accent: isDarkMode
-          ? 'border-[#3d6f86] bg-[#173046]'
+          ? 'border-[rgba(116,201,215,0.35)] bg-[#1b3349]'
           : 'border-blue-200 bg-blue-50',
       },
       {
@@ -1814,7 +1814,7 @@ const PassTracker = () => {
         title: 'Overdue',
         emptyMessage: 'Nothing is overdue right now.',
         accent: isDarkMode
-          ? 'border-[#8a4d4d] bg-[#3a1f24]'
+          ? 'border-[rgba(143,60,60,0.45)] bg-[rgba(143,60,60,0.22)]'
           : 'border-red-200 bg-red-50',
       },
       {
@@ -1822,7 +1822,7 @@ const PassTracker = () => {
         title: 'Upcoming',
         emptyMessage: 'No tasks are coming up in the next two days.',
         accent: isDarkMode
-          ? 'border-[#8a7340] bg-[#3a321c]'
+          ? 'border-[rgba(201,162,78,0.4)] bg-[rgba(201,162,78,0.18)]'
           : 'border-yellow-200 bg-yellow-50',
       },
     ];
@@ -1837,13 +1837,13 @@ const PassTracker = () => {
             {items.map(item => (
               <div
                 key={`${item.examId}-${item.materialId}-${item.taskType}-${item.dueDate}`}
-                className={`rounded-lg border p-4 ${isDarkMode ? 'bg-[#1c343b] border-[#5c8a9a]' : 'bg-white border-gray-200'}`}
+                className={`rounded-lg border p-4 ${isDarkMode ? 'bg-[#223F5A] border-[rgba(232,217,188,0.28)]' : 'bg-white border-gray-200'}`}
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className={`font-semibold ${isDarkMode ? 'text-gray-50' : 'text-gray-900'}`}>{item.materialName}</p>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${isDarkMode ? 'bg-[#304a53] text-slate-100' : 'bg-gray-100 text-gray-700'}`}>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${isDarkMode ? 'bg-[#164E6B] text-[#F6F2E8]' : 'bg-gray-100 text-gray-700'}`}>
                         {item.taskType}
                       </span>
                     </div>
@@ -1874,7 +1874,7 @@ const PassTracker = () => {
           </p>
         </div>
 
-        <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-[#18262b] border-[#456974]' : 'bg-white border-gray-200'}`}>
+        <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-[#223F5A] border-[rgba(232,217,188,0.22)]' : 'bg-white border-gray-200'}`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className={`text-sm font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Exams in To Do</p>
@@ -1888,7 +1888,7 @@ const PassTracker = () => {
                 onClick={() => setTodoExamMenuOpen(open => !open)}
                 className={`inline-flex min-w-[220px] items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
                   isDarkMode
-                    ? 'border-[#5c8a9a] bg-[#21343a] text-gray-100 hover:bg-[#304a53]'
+                    ? 'border-[rgba(232,217,188,0.28)] bg-[#164E6B] text-[#F6F2E8] hover:bg-[#1b3349]'
                     : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-50'
                 }`}
               >
@@ -1899,11 +1899,11 @@ const PassTracker = () => {
                 <div
                   className={`absolute right-0 z-20 mt-2 w-72 rounded-lg border p-2 shadow-lg ${
                     isDarkMode
-                      ? 'border-[#5c8a9a] bg-[#18262b]'
+                      ? 'border-[rgba(232,217,188,0.28)] bg-[#223F5A]'
                       : 'border-gray-200 bg-white'
                   }`}
                 >
-                  <div className={`mb-2 flex items-center justify-between gap-2 px-2 pb-2 border-b ${isDarkMode ? 'border-[#456974]' : 'border-gray-200'}`}>
+                  <div className={`mb-2 flex items-center justify-between gap-2 px-2 pb-2 border-b ${isDarkMode ? 'border-[rgba(232,217,188,0.22)]' : 'border-gray-200'}`}>
                     <button
                       type="button"
                       onClick={() => setTodoExamIds(exams.map(exam => exam.id))}
@@ -1927,7 +1927,7 @@ const PassTracker = () => {
                           key={exam.id}
                           className={`flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm ${
                             isDarkMode
-                              ? 'text-gray-100 hover:bg-[#21343a]'
+                              ? 'text-gray-100 hover:bg-[#1b3349]'
                               : 'text-gray-800 hover:bg-gray-50'
                           }`}
                         >
