@@ -9,6 +9,10 @@
 
 The app uses **email + password** auth (with optional username on signup) and stores the current study state in `public.user_app_state`.
 
+In-app feedback is stored in `public.app_feedback`. Anyone can insert a row; there is no client-side read policy, so review submissions in the Supabase Table Editor.
+
+If your project already has `user_app_state`, you can run only `feedback.sql` instead of re-running the full `schema.sql`.
+
 Email confirmation can stay **off** for simpler sign-in. Password recovery still needs working SMTP so reset emails can be delivered.
 
 ## Resend SMTP (password recovery)

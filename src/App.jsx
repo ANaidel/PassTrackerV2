@@ -1,6 +1,7 @@
 import React, { Fragment, useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User, ChevronDown, Bell } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User, ChevronDown, Bell, MessageSquare } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
+import FeedbackForm from './FeedbackForm';
 import {
   loadReminderSettings,
   saveReminderSettings,
@@ -924,6 +925,7 @@ const PassTracker = () => {
   const [resourcePage, setResourcePage] = useState('home');
   const [theme, setTheme] = useState(() => localStorage.getItem('passTrackerTheme') || 'light');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const initialTaskTemplates = loadTaskTemplates();
   const initialExams = loadExams(initialTaskTemplates);
   const [taskTemplates, setTaskTemplates] = useState(() => initialTaskTemplates);
@@ -2974,6 +2976,15 @@ const PassTracker = () => {
           <div className="flex items-center justify-between py-3 lg:hidden">
             <div className="text-2xl font-bold text-blue-600 whitespace-nowrap">PassTracker™</div>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFeedbackOpen(true)}
+                className="inline-flex items-center justify-center rounded-lg border border-gray-300 p-2 text-gray-700 hover:bg-gray-100"
+                aria-label="Send feedback"
+                title="Send feedback"
+              >
+                <MessageSquare size={18} />
+              </button>
               <ThemeToggle className="shrink-0" />
               <button
                 onClick={() => setMobileMenuOpen(prev => !prev)}
@@ -3013,6 +3024,14 @@ const PassTracker = () => {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setFeedbackOpen(true)}
+                className="hidden lg:inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
+              >
+                <MessageSquare size={16} />
+                <span>Feedback</span>
+              </button>
               <ThemeToggle className="hidden lg:inline-flex shrink-0" />
               {/* Exam Selector */}
               {(activeTab === 'dashboard' || activeTab === 'tracker') && sortedExams.length > 0 && (
@@ -3081,6 +3100,17 @@ const PassTracker = () => {
                     <span>{tab.label}</span>
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFeedbackOpen(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-left font-medium text-gray-700 transition hover:bg-gray-100"
+                >
+                  <MessageSquare size={18} />
+                  <span>Feedback</span>
+                </button>
               </div>
 
               {(activeTab === 'dashboard' || activeTab === 'tracker') && sortedExams.length > 0 && (
@@ -3162,6 +3192,13 @@ const PassTracker = () => {
         {activeTab === 'todo' && <TodoPage />}
         {activeTab === 'resources' && <ResourcesSection />}
       </div>
+
+      <FeedbackForm
+        open={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+        cloudUser={cloudUser}
+        activeTab={activeTab}
+      />
     </div>
   );
 };
