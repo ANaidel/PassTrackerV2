@@ -1,5 +1,5 @@
 import React, { Fragment, useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User, ChevronDown, Bell } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Circle, Clock, TrendingUp, Home, BookOpen, FlaskConical, ExternalLink, ArrowLeft, Menu, X, Moon, Sun, Cloud, Loader2, LogOut, Mail, Lock, User, ChevronDown, Bell, MessageSquare } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 import {
   loadReminderSettings,
@@ -919,6 +919,168 @@ const CloudSyncPanel = ({
   );
 };
 
+const FEEDBACK_CATEGORIES = [
+  { id: 'general', label: 'General' },
+  { id: 'bug', label: 'Bug report' },
+  { id: 'feature', label: 'Feature request' },
+  { id: 'other', label: 'Other' },
+];
+
+const FeedbackPage = ({
+  isSupabaseConfigured,
+  defaultName = '',
+  defaultEmail = '',
+  onSubmit,
+}) => {
+  const [name, setName] = useState(defaultName);
+  const [email, setEmail] = useState(defaultEmail);
+  const [category, setCategory] = useState('general');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    setName(defaultName);
+  }, [defaultName]);
+
+  useEffect(() => {
+    setEmail(defaultEmail);
+  }, [defaultEmail]);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage) {
+      setError('Please enter your feedback before submitting.');
+      setNotice('');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await onSubmit({
+        name: name.trim(),
+        email: email.trim(),
+        category,
+        message: trimmedMessage,
+      });
+      setMessage('');
+      setCategory('general');
+      setNotice('Thanks! Your feedback was submitted.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to submit feedback.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-8 rounded-lg">
+        <h1 className="text-4xl font-bold mb-2">Feedback</h1>
+        <p className="text-blue-100">Tell us what is working, what is broken, or what you want next.</p>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg border border-gray-200">
+        <div className="flex items-center gap-2 mb-2">
+          <MessageSquare className="text-blue-600" size={20} />
+          <h2 className="text-xl font-bold">Send feedback</h2>
+        </div>
+        <p className="text-sm text-gray-600 mb-6">
+          Share bugs, ideas, or general thoughts about PassTracker. Name and email are optional,
+          but help if we need to follow up.
+        </p>
+
+        {!isSupabaseConfigured && (
+          <p className="mb-4 text-sm text-amber-700">
+            Supabase is not configured yet, so feedback cannot be saved. Add your URL and anon key,
+            then run the feedback table from <code className="font-mono text-xs">supabase/schema.sql</code>.
+          </p>
+        )}
+
+        {notice && <p className="mb-4 text-sm text-green-700">{notice}</p>}
+        {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+
+        <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="feedback-name" className="block text-sm font-medium text-gray-700 mb-1">
+                Name <span className="font-normal text-gray-500">(optional)</span>
+              </label>
+              <input
+                id="feedback-name"
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Your name"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="feedback-email" className="block text-sm font-medium text-gray-700 mb-1">
+                Email <span className="font-normal text-gray-500">(optional)</span>
+              </label>
+              <input
+                id="feedback-email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="feedback-category" className="block text-sm font-medium text-gray-700 mb-1">
+              Category
+            </label>
+            <select
+              id="feedback-category"
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              {FEEDBACK_CATEGORIES.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="feedback-message" className="block text-sm font-medium text-gray-700 mb-1">
+              Message
+            </label>
+            <textarea
+              id="feedback-message"
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder="What would you like us to know?"
+              rows={6}
+              required
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={busy || !isSupabaseConfigured || !message.trim()}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="animate-spin" size={16} /> : <MessageSquare size={16} />}
+            {busy ? 'Submitting...' : 'Submit feedback'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 const PassTracker = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [resourcePage, setResourcePage] = useState('home');
@@ -1100,10 +1262,29 @@ const PassTracker = () => {
     { id: 'dashboard', label: 'Dashboard', icon: Home },
     { id: 'tracker', label: 'Progress Tracker', icon: TrendingUp },
     { id: 'todo', label: 'To Do' },
-    { id: 'resources', label: 'Resources', icon: BookOpen }
+    { id: 'resources', label: 'Resources', icon: BookOpen },
+    { id: 'feedback', label: 'Feedback', icon: MessageSquare },
   ];
   const isDarkMode = theme === 'dark';
   const toggleTheme = () => setTheme(current => (current === 'dark' ? 'light' : 'dark'));
+
+  const handleFeedbackSubmit = async ({ name, email, category, message }) => {
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error('Supabase is not configured, so feedback cannot be saved.');
+    }
+
+    const { error } = await supabase.from('feedback').insert({
+      user_id: cloudUser?.id ?? null,
+      name: name || null,
+      email: email || null,
+      category,
+      message,
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  };
 
   const handleCloudPasswordSignIn = async (email, password) => {
     if (!supabase || !email?.trim() || !password) return;
@@ -3045,7 +3226,7 @@ const PassTracker = () => {
                   </button>
                 </div>
               )}
-              {activeTab !== 'resources' && sortedExams.length === 0 && (
+              {activeTab !== 'resources' && activeTab !== 'feedback' && sortedExams.length === 0 && (
                 <button
                   onClick={() => {
                     addExam();
@@ -3117,7 +3298,7 @@ const PassTracker = () => {
                 </div>
               )}
 
-              {activeTab !== 'resources' && sortedExams.length === 0 && (
+              {activeTab !== 'resources' && activeTab !== 'feedback' && sortedExams.length === 0 && (
                 <button
                   onClick={() => {
                     addExam();
@@ -3161,6 +3342,14 @@ const PassTracker = () => {
         {activeTab === 'tracker' && <ProgressTracker />}
         {activeTab === 'todo' && <TodoPage />}
         {activeTab === 'resources' && <ResourcesSection />}
+        {activeTab === 'feedback' && (
+          <FeedbackPage
+            isSupabaseConfigured={isSupabaseConfigured}
+            defaultName={cloudUser?.user_metadata?.username || ''}
+            defaultEmail={cloudUser?.email || ''}
+            onSubmit={handleFeedbackSubmit}
+          />
+        )}
       </div>
     </div>
   );
