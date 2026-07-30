@@ -9,6 +9,8 @@
 
 The app uses **email + password** auth (with optional username on signup) and stores the current study state in `public.user_app_state`.
 
+User feedback from the in-app **Feedback** page is stored in `public.feedback`. Anyone can insert a row (signed in or anonymous). Signed-in users can read their own submissions; there is no public read of other users' feedback.
+
 Email confirmation can stay **off** for simpler sign-in. Password recovery still needs working SMTP so reset emails can be delivered.
 
 ## Resend SMTP (password recovery)
